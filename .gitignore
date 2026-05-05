@@ -1,0 +1,59 @@
+# =============================================
+# .NET / C# — APICSHARP-ABML
+# =============================================
+APICSHARP-ABML/bin/
+APICSHARP-ABML/obj/
+APICSHARP-ABML/.vs/
+APICSHARP-ABML/*.user
+APICSHARP-ABML/*.suo
+APICSHARP-ABML/.vscode/
+
+# Configuración con secretos — nunca subir
+APICSHARP-ABML/appsettings.json
+APICSHARP-ABML/appsettings.Development.json
+APICSHARP-ABML/appsettings.Production.json
+
+# =============================================
+# Python — Desktop-ABML
+# =============================================
+
+# Caché de Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Entornos virtuales
+Desktop-ABML/env/
+Desktop-ABML/.venv/
+Desktop-ABML/venv/
+env/
+.venv/
+venv/
+
+# Build y distribución (ejecutable compilado)
+Desktop-ABML/build/
+Desktop-ABML/dist/
+
+# Dataset — sesiones con imágenes y CSVs (archivos grandes)
+Desktop-ABML/dataset/sessions/
+
+# =============================================
+# Node.js / React — WebSite-ABMLL
+# =============================================
+WebSite-ABMLL/node_modules/
+WebSite-ABMLL/dist/
+WebSite-ABMLL/.env
+WebSite-ABMLL/.env.local
+WebSite-ABMLL/.env.production
+WebSite-ABMLL/.vite/
+
+# =============================================
+# General
+# =============================================
+.env
+.env.local
+*.log
+.DS_Store
+Thumbs.db
+desktop.ini
