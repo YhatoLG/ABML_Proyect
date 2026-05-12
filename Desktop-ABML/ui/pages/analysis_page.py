@@ -712,15 +712,20 @@ class AnalysisPage(ctk.CTkFrame):
     # ── Salir ─────────────────────────────────────────────────────────────────
 
     def _exit(self):
-        self._notificar_fin_api()
-        finish_session(self.session["id"])
+        self._cleanup_on_close()
         for key in ("<KeyPress-1>", "<KeyPress-0>", "<Escape>"):
             try:
                 self._app.unbind(key)
             except Exception:
                 pass
-        self.stop()
         self._app.show_main_menu()
+
+    def _cleanup_on_close(self):
+        """Limpieza al cerrar (ESC, botón Salir o X de Windows) — sin navegar."""
+        self._export_group_report()
+        self._notificar_fin_api()
+        finish_session(self.session["id"])
+        self.stop()
 
     # ── Fuentes de captura ────────────────────────────────────────────────────
 
