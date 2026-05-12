@@ -296,7 +296,7 @@ class HistoryPage(ctk.CTkFrame):
         )
         if not ok:
             return
-        if delete_group_report(report.get("filepath", "")):
+        if delete_group_report(report.get("id", "")):
             self._app.show_history()
         else:
             mb.showerror("Error", "No se pudo eliminar el reporte.")
