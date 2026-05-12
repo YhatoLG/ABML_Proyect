@@ -23,7 +23,7 @@ from model.capture import get_sources, capture_frame
 from model.emotion_analyzer import analyze_emotion
 from model.session_manager import finish_session, create_session
 from model.groups_manager import list_question_groups
-from model.config import API_BASE_URL, API_SESSION
+from model.config import API_BASE_URL, API_SESSION, DATASET_DIR
 from ui.pages.setup_page import _make_readonly
 
 
@@ -40,6 +40,15 @@ class AnalysisPage(ctk.CTkFrame):
         self._q_group_name       : str  = ctx.get("q_group_name", session.get("question_group", ""))
         self._n_questions        : int  = ctx.get("n_questions", len(self.questions))
         self._current_person_idx : int  = ctx.get("current_person_idx", 0)
+
+        # Personas que ya completaron el análisis en este ciclo de grupo
+        self._completed_persons   : set  = set(ctx.get("completed_persons", []))
+        # Registros acumulados de todo el grupo (para el reporte final CSV)
+        self._group_records       : list = list(ctx.get("group_records", []))
+        # Bandera: bloquea nuevos saves mientras se carga la siguiente persona
+        self._transitioning       : bool = False
+        # Evita generar el reporte de grupo más de una vez
+        self._group_report_saved  : bool = False
 
         # Estado de navegación de preguntas
         self.current_q_idx = 0
@@ -340,12 +349,12 @@ class AnalysisPage(ctk.CTkFrame):
         self._sel_q_combo.pack(side="left", fill="x", expand=True)
         _make_readonly(self._sel_q_combo)
 
-        # — Persona —
+        # — Persona: solo muestra las que aún no completaron —
         r_person = ctk.CTkFrame(inner, fg_color="transparent")
         r_person.pack(fill="x", pady=(0, 4))
         ctk.CTkLabel(r_person, image=self._ic_persona_dim, text="", width=20).pack(side="left", padx=(0, 4))
 
-        people   = list(self._person_group)
+        people   = [p for p in self._person_group if p not in self._completed_persons]
         cur_name = self.session["name"]
         self._sel_person_var = ctk.StringVar(
             value=cur_name if cur_name in people else (people[0] if people else ""))
@@ -388,19 +397,30 @@ class AnalysisPage(ctk.CTkFrame):
     # ── Lógica de selectores ──────────────────────────────────────────────────
 
     def _on_sel_q_group_change(self, value: str):
-        """Cambiar banco recarga inmediatamente las preguntas para la persona actual."""
+        """Cambiar banco recarga las preguntas para la persona actual.
+        Las personas ya completadas siguen bloqueadas aunque cambie el grupo."""
         if value == self._q_group_name:
             return
         self._q_group_name = value
+        self._update_person_selector()
         self._load_new_person(self.session["name"])
 
     def _on_sel_person_change(self, value: str):
         """Cambiar persona manualmente carga una nueva sesión para esa persona."""
         if value == self.session["name"]:
             return
+        if value in self._completed_persons:
+            # Persona ya evaluada — revertir selección al sujeto actual
+            self._sel_person_var.set(self.session["name"])
+            return
         if value in self._person_group:
             self._current_person_idx = self._person_group.index(value)
         self._load_new_person(value)
+
+    def _update_person_selector(self):
+        """Refresca el combo de personas eliminando a quienes ya completaron."""
+        available = [p for p in self._person_group if p not in self._completed_persons]
+        self._sel_person_combo.configure(values=available if available else [""])
 
     def _change_sel_n(self, delta: int):
         self._sel_n = max(1, self._sel_n + delta)
@@ -511,7 +531,7 @@ class AnalysisPage(ctk.CTkFrame):
     # ── Guardar registro ──────────────────────────────────────────────────────
 
     def _save(self, response: int):
-        if self.current_frame is None:
+        if self.current_frame is None or self._transitioning:
             return
 
         timestamp  = datetime.datetime.now().isoformat()
@@ -529,6 +549,17 @@ class AnalysisPage(ctk.CTkFrame):
             cor_idx = q.get("correct", -1)
             if 0 <= cor_idx < len(opts):
                 correct_answer = opts[cor_idx]
+
+        # Acumular en el reporte del grupo
+        self._group_records.append({
+            "persona":            self.session["name"],
+            "pregunta":           question_text,
+            "respuesta_correcta": correct_answer,
+            "emocion":            self.emotion,
+            "prob_emocion":       round(self.emotion_prob, 2),
+            "respondio":          response == 1,
+            "timestamp":          timestamp,
+        })
 
         def _post_registro():
             try:
@@ -562,25 +593,38 @@ class AnalysisPage(ctk.CTkFrame):
         if not at_last:
             self.after(100, self._next_q)
         elif self._person_group:
-            # Última pregunta → avanzar a siguiente persona
-            self.after(300, self._trigger_person_completed)
+            # Última pregunta → marcar persona como completada y avanzar de inmediato
+            self._trigger_person_completed()
         else:
             self.after(1500, lambda: self.status_label.configure(text_color=T.TEXT_LIGHT))
 
     # ── Avance automático entre personas ─────────────────────────────────────
 
     def _trigger_person_completed(self):
+        if self._transitioning:
+            return
+        self._transitioning = True
         name = self.session["name"]
+        # Registrar persona como completada y actualizar selector
+        self._completed_persons.add(name)
+        self._update_person_selector()
         self.status_label.configure(
-            text=f"✓  {name} completó todas las preguntas · Avanzando...",
+            text=f"✓  {name} completó · Cargando siguiente...",
             text_color=T.GREEN_PRIMARY,
         )
-        self.after(2000, self._advance_to_next_person)
+        self.after(400, self._advance_to_next_person)
 
     def _advance_to_next_person(self):
+        # Buscar el siguiente índice cuya persona aún no haya completado
         next_idx = self._current_person_idx + 1
+        while next_idx < len(self._person_group):
+            if self._person_group[next_idx] not in self._completed_persons:
+                break
+            next_idx += 1
+
         if next_idx >= len(self._person_group):
-            # Todas las personas terminaron
+            # Todas las personas terminaron → generar archivo de grupo
+            self._export_group_report()
             self._notificar_fin_api()
             self.status_label.configure(
                 text="✓  Todos completaron la prueba · Cerrando sesión...",
@@ -593,33 +637,65 @@ class AnalysisPage(ctk.CTkFrame):
         next_person = self._person_group[next_idx]
         self._load_new_person(next_person)
 
-    def _load_new_person(self, person_name: str):
-        """Finaliza la sesión actual y crea una nueva para la persona indicada."""
-        finish_session(self.session["id"])
-
-        # Buscar preguntas disponibles
-        groups    = list_question_groups()
-        g         = next((g for g in groups if g["name"] == self._q_group_name), None)
-        if not g:
-            self._exit()
+    def _export_group_report(self):
+        """Genera un CSV único con los registros de todas las personas del grupo."""
+        if not self._group_records or self._group_report_saved:
             return
+        self._group_report_saved = True
+        now        = datetime.datetime.now()
+        date_str   = now.strftime("%Y-%m-%d_%H-%M-%S")
+        group_safe = "".join(
+            c if c.isalnum() or c in "-_ " else "_"
+            for c in (self._q_group_name or "grupo")
+        )
+        filename = f"grupo_{group_safe}_{date_str}.csv"
+        out_dir  = os.path.join(DATASET_DIR, "grupos")
+        os.makedirs(out_dir, exist_ok=True)
+        filepath = os.path.join(out_dir, filename)
 
-        # Usar todas las preguntas del banco: random.sample garantiza
-        # no-repetición DENTRO de esta sesión (sin filtrar historial entre sesiones)
-        all_qs   = g["questions"]
-        n        = min(self._n_questions, len(all_qs))
-        selected = random.sample(all_qs, n)
-        new_session = create_session(person_name, selected, question_group=self._q_group_name)
+        fields = ["persona", "pregunta", "respuesta_correcta",
+                  "emocion", "prob_emocion", "respondio", "timestamp"]
+        with open(filepath, "w", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(f, fieldnames=fields)
+            writer.writeheader()
+            for rec in self._group_records:
+                writer.writerow({k: rec.get(k, "") for k in fields})
 
-        # Actualizar estado
-        self.session          = new_session
-        self.questions        = selected
-        self.current_q_idx    = 0
-        self._saves_per_q     = {}
-        self.positive_count   = 0
-        self.negative_count   = 0
+    def _load_new_person(self, person_name: str):
+        """Finaliza la sesión actual y crea una nueva para la persona indicada.
+        La consulta al API se hace en un thread para no bloquear la UI."""
+        finish_session(self.session["id"])
+        self.status_label.configure(
+            text=f"⏳  Preparando preguntas para {person_name}...",
+            text_color=T.TEXT_MID,
+        )
 
-        # Actualizar UI
+        n_questions = self._n_questions
+        q_group     = self._q_group_name
+
+        def _prepare():
+            groups = list_question_groups()
+            g      = next((gr for gr in groups if gr["name"] == q_group), None)
+            if not g:
+                self.after(0, self._exit)
+                return
+            all_qs      = g["questions"]
+            n           = min(n_questions, len(all_qs))
+            selected    = random.sample(all_qs, n)
+            new_session = create_session(person_name, selected, question_group=q_group)
+            self.after(0, lambda: self._apply_new_person(person_name, n, selected, new_session))
+
+        threading.Thread(target=_prepare, daemon=True).start()
+
+    def _apply_new_person(self, person_name: str, n: int, selected: list, new_session: dict):
+        """Aplica el estado de la nueva persona en el hilo principal de la UI."""
+        self.session        = new_session
+        self.questions      = selected
+        self.current_q_idx  = 0
+        self._saves_per_q   = {}
+        self.positive_count = 0
+        self.negative_count = 0
+
         self._sel_person_var.set(person_name)
         self.person_name_lbl.configure(text=person_name)
         self.pos_badge.configure(text="0")
@@ -630,6 +706,8 @@ class AnalysisPage(ctk.CTkFrame):
             text=f"👤  {person_name}  ·  {n} preguntas  ·  Análisis Activo",
             text_color=T.GREEN_PRIMARY,
         )
+        # Habilitar saves nuevamente ahora que la persona está lista
+        self._transitioning = False
 
     # ── Salir ─────────────────────────────────────────────────────────────────
 
