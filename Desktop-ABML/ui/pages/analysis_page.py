@@ -5,7 +5,7 @@ Separa captura (model/capture.py) y análisis de emoción
 (model/emotion_analyzer.py) de la lógica de presentación.
 """
 import os
-import csv
+import uuid
 import time
 import random
 import datetime
@@ -23,7 +23,7 @@ from model.capture import get_sources, capture_frame
 from model.emotion_analyzer import analyze_emotion
 from model.session_manager import finish_session, create_session
 from model.groups_manager import list_question_groups
-from model.config import API_BASE_URL, API_SESSION, DATASET_DIR
+from model.config import API_BASE_URL, API_SESSION
 from ui.pages.setup_page import _make_readonly
 
 
@@ -657,28 +657,41 @@ class AnalysisPage(ctk.CTkFrame):
         self._load_new_person(next_person)
 
     def _export_group_report(self):
-        """Genera un CSV único con los registros de todas las personas del grupo."""
+        """Guarda el reporte del grupo en la base de datos via API."""
         if not self._group_records or self._group_report_saved:
             return
         self._group_report_saved = True
-        now        = datetime.datetime.now()
-        date_str   = now.strftime("%Y-%m-%d_%H-%M-%S")
-        group_safe = "".join(
-            c if c.isalnum() or c in "-_ " else "_"
-            for c in (self._q_group_name or "grupo")
-        )
-        filename = f"grupo_{group_safe}_{date_str}.csv"
-        out_dir  = os.path.join(DATASET_DIR, "grupos")
-        os.makedirs(out_dir, exist_ok=True)
-        filepath = os.path.join(out_dir, filename)
 
-        fields = ["persona", "pregunta", "respuesta_correcta",
-                  "emocion", "prob_emocion", "respondio", "timestamp"]
-        with open(filepath, "w", newline="", encoding="utf-8") as f:
-            writer = csv.DictWriter(f, fieldnames=fields)
-            writer.writeheader()
-            for rec in self._group_records:
-                writer.writerow({k: rec.get(k, "") for k in fields})
+        import json as _json
+        now = datetime.datetime.now()
+
+        seen, persons = set(), []
+        for rec in self._group_records:
+            p = rec.get("persona", "")
+            if p and p not in seen:
+                seen.add(p)
+                persons.append(p)
+
+        reporte_id = str(uuid.uuid4())
+
+        def _save():
+            try:
+                API_SESSION.post(
+                    f"{API_BASE_URL}/api/reportes_grupo",
+                    json={
+                        "id":           reporte_id,
+                        "nombre_grupo": self._q_group_name or "grupo",
+                        "fecha":        now.strftime("%Y-%m-%d"),
+                        "hora":         now.strftime("%H:%M:%S"),
+                        "personas":     _json.dumps(persons, ensure_ascii=False),
+                        "registros":    _json.dumps(self._group_records, ensure_ascii=False),
+                    },
+                    timeout=15,
+                )
+            except Exception:
+                pass
+
+        threading.Thread(target=_save, daemon=True).start()
 
     def _load_new_person(self, person_name: str):
         """Finaliza la sesión actual y crea una nueva para la persona indicada.

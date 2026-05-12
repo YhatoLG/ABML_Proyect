@@ -2,17 +2,17 @@
 model/session_manager.py — Persistencia de sesiones via API + directorio local para imágenes.
 """
 import os
-import re
-import csv
 import uuid
+import json as _json
 import datetime
 import threading
 
 from model.config import API_BASE_URL, DATASET_DIR, API_SESSION
 
-_CONSULTA_URL = f"{API_BASE_URL}/api/consultas/ejecutarconsultaparametrizada"
-_SESIONES_URL = f"{API_BASE_URL}/api/sesiones"
-_SP_URL       = f"{API_BASE_URL}/api/sesion_preguntas"
+_CONSULTA_URL       = f"{API_BASE_URL}/api/consultas/ejecutarconsultaparametrizada"
+_SESIONES_URL       = f"{API_BASE_URL}/api/sesiones"
+_SP_URL             = f"{API_BASE_URL}/api/sesion_preguntas"
+_REPORTES_GRUPO_URL = f"{API_BASE_URL}/api/reportes_grupo"
 
 
 def _local_dir(session_id: str) -> str:
@@ -45,51 +45,54 @@ def load_sessions() -> list:
 
 
 def load_group_reports() -> list:
-    """Lee los CSVs de grupo guardados localmente en DATASET_DIR/grupos/."""
-    grupos_dir = os.path.join(DATASET_DIR, "grupos")
-    if not os.path.isdir(grupos_dir):
+    """Carga los reportes de grupo desde la base de datos via API."""
+    try:
+        r = API_SESSION.post(
+            _CONSULTA_URL,
+            json={
+                "consulta":   "SELECT id, nombre_grupo, fecha, hora, personas, registros "
+                              "FROM reportes_grupo ORDER BY fecha DESC, hora DESC",
+                "parametros": {},
+            },
+            timeout=10,
+        )
+        if r.status_code != 200:
+            return []
+        data = r.json()
+        rows = data.get("resultados") or data.get("Resultados") or []
+
+        reports = []
+        for row in rows:
+            try:
+                persons = _json.loads(row.get("personas") or "[]")
+            except Exception:
+                persons = []
+            try:
+                records = _json.loads(row.get("registros") or "[]")
+            except Exception:
+                records = []
+
+            reports.append({
+                "id":         str(row.get("id", "")),
+                "group_name": row.get("nombre_grupo", ""),
+                "date":       str(row.get("fecha", ""))[:10],
+                "time":       str(row.get("hora", "")),
+                "persons":    persons,
+                "records":    records,
+            })
+        return reports
+    except Exception:
         return []
 
-    reports = []
-    pattern = re.compile(r'^grupo_(.+)_(\d{4}-\d{2}-\d{2})_(\d{2}-\d{2}-\d{2})\.csv$')
-    for fname in os.listdir(grupos_dir):
-        m = pattern.match(fname)
-        if not m:
-            continue
-        fpath      = os.path.join(grupos_dir, fname)
-        group_name = m.group(1)
-        date_str   = m.group(2)
-        time_str   = m.group(3).replace("-", ":")
-        try:
-            with open(fpath, "r", encoding="utf-8") as f:
-                records = list(csv.DictReader(f))
-        except Exception:
-            continue
-        # Personas en el orden en que aparecen (sin duplicados)
-        seen, persons = set(), []
-        for rec in records:
-            p = rec.get("persona", "")
-            if p and p not in seen:
-                seen.add(p)
-                persons.append(p)
-        reports.append({
-            "id":         fname,
-            "filepath":   fpath,
-            "group_name": group_name,
-            "date":       date_str,
-            "time":       time_str,
-            "persons":    persons,
-            "records":    records,
-        })
 
-    return sorted(reports, key=lambda x: (x["date"], x["time"]), reverse=True)
-
-
-def delete_group_report(filepath: str) -> bool:
-    """Elimina un archivo de reporte de grupo."""
+def delete_group_report(report_id: str) -> bool:
+    """Elimina un reporte de grupo de la API/base de datos."""
     try:
-        os.remove(filepath)
-        return True
+        r = API_SESSION.delete(
+            f"{_REPORTES_GRUPO_URL}/id/{report_id}",
+            timeout=10,
+        )
+        return r.status_code in (200, 204)
     except Exception:
         return False
 
