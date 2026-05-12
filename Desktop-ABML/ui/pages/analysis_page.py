@@ -49,6 +49,8 @@ class AnalysisPage(ctk.CTkFrame):
         self._transitioning       : bool = False
         # Evita generar el reporte de grupo más de una vez
         self._group_report_saved  : bool = False
+        # Evita doble respuesta si el usuario presiona/clica rápido
+        self._answering           : bool = False
 
         # Estado de navegación de preguntas
         self.current_q_idx = 0
@@ -263,7 +265,7 @@ class AnalysisPage(ctk.CTkFrame):
         ctk.CTkLabel(qh, image=self._ic_pregunta, text="").pack(side="left", padx=(0, 4))
         ctk.CTkLabel(qh, text="PREGUNTA ACTUAL",
                      text_color=T.GREEN_PRIMARY, font=T.bold(10)).pack(side="left")
-        self.q_count_lbl = ctk.CTkLabel(qh, text="1 / 1", text_color=T.GREEN_PRIMARY, font=T.bold(10))
+        self.q_count_lbl = ctk.CTkLabel(qh, text=f"1 / {len(self.questions)}", text_color=T.GREEN_PRIMARY, font=T.bold(10))
         self.q_count_lbl.pack(side="right")
 
         # Texto de la pregunta
@@ -423,9 +425,17 @@ class AnalysisPage(ctk.CTkFrame):
         self._sel_person_combo.configure(values=available if available else [""])
 
     def _change_sel_n(self, delta: int):
-        self._sel_n = max(1, self._sel_n + delta)
-        self._n_questions = self._sel_n
-        self._sel_n_lbl.configure(text=str(self._sel_n))
+        if self._transitioning:
+            return
+        new_n = max(1, self._sel_n + delta)
+        if new_n == self._sel_n:
+            return
+        self._sel_n       = new_n
+        self._n_questions = new_n
+        self._sel_n_lbl.configure(text=str(new_n))
+        # Recargar preguntas para la persona actual con el nuevo número
+        self._transitioning = True
+        self._load_new_person(self.session["name"])
 
     # ── Navegación de preguntas ───────────────────────────────────────────────
 
@@ -531,8 +541,9 @@ class AnalysisPage(ctk.CTkFrame):
     # ── Guardar registro ──────────────────────────────────────────────────────
 
     def _save(self, response: int):
-        if self.current_frame is None or self._transitioning:
+        if self.current_frame is None or self._transitioning or self._answering:
             return
+        self._answering = True
 
         timestamp  = datetime.datetime.now().isoformat()
         image_name = timestamp.replace(":", "-") + ".png"
@@ -544,7 +555,7 @@ class AnalysisPage(ctk.CTkFrame):
         question_text = q["text"] if isinstance(q, dict) else q
 
         correct_answer = ""
-        if response == 1 and isinstance(q, dict):
+        if isinstance(q, dict):
             opts    = q.get("options", [])
             cor_idx = q.get("correct", -1)
             if 0 <= cor_idx < len(opts):
@@ -591,12 +602,20 @@ class AnalysisPage(ctk.CTkFrame):
         # Avance de preguntas / personas
         at_last = (self.current_q_idx >= len(self.questions) - 1)
         if not at_last:
-            self.after(100, self._next_q)
+            self.after(100, self._auto_next_q)
         elif self._person_group:
             # Última pregunta → marcar persona como completada y avanzar de inmediato
             self._trigger_person_completed()
         else:
-            self.after(1500, lambda: self.status_label.configure(text_color=T.TEXT_LIGHT))
+            def _reset_and_dim():
+                self._answering = False
+                self.status_label.configure(text_color=T.TEXT_LIGHT)
+            self.after(1500, _reset_and_dim)
+
+    def _auto_next_q(self):
+        """Avance automático tras guardar: libera el bloqueo y avanza la pregunta."""
+        self._answering = False
+        self._next_q()
 
     # ── Avance automático entre personas ─────────────────────────────────────
 
@@ -708,6 +727,7 @@ class AnalysisPage(ctk.CTkFrame):
         )
         # Habilitar saves nuevamente ahora que la persona está lista
         self._transitioning = False
+        self._answering     = False
 
     # ── Salir ─────────────────────────────────────────────────────────────────
 

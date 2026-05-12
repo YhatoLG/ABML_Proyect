@@ -465,7 +465,6 @@ class SetupPage(ctk.CTkFrame):
 
         first_person = all_people[0]
         n            = min(5, len(g["questions"]))
-        # random.sample garantiza no repetición DENTRO de la sesión
         selected_qs  = random.sample(g["questions"], n)
 
         context = {
