@@ -13,7 +13,7 @@ from PIL import Image
 import ui.theme as T
 from ui.assets import FLECHA_IZQ_FILE, USUARIO_FILE, REPORTE_FILE, DESCARGA_FILE, ELIMINAR_FILE
 from ui.tooltip import Tooltip
-from model.session_manager import load_sessions, delete_session
+from model.session_manager import load_sessions, delete_session, load_group_reports, delete_group_report
 from model.config import API_BASE_URL, API_SESSION
 
 
@@ -45,6 +45,7 @@ class HistoryPage(ctk.CTkFrame):
     def _load_icons(self):
         self._ico_back    = _load_icon(FLECHA_IZQ_FILE, T.TEXT_MID,     size=20)
         self._ico_usuario = _load_icon(USUARIO_FILE,    T.GREEN_PRIMARY, size=24)
+        self._ico_grupo   = _load_icon(USUARIO_FILE,    "#4fc3f7",       size=24)
         self._ico_excel   = _load_icon(REPORTE_FILE,    T.GREEN_PRIMARY, size=24)
         self._ico_zip     = _load_icon(DESCARGA_FILE,   T.TEXT_LIGHT,    size=24)
         self._ico_delete  = _load_icon(ELIMINAR_FILE,   T.RED_PRIMARY,   size=22)
@@ -68,29 +69,133 @@ class HistoryPage(ctk.CTkFrame):
         back_btn.pack(side="left")
         Tooltip(back_btn, "Volver al menú principal")
 
-        # Título centrado
         title_f = ctk.CTkFrame(self, fg_color="transparent")
         title_f.pack(pady=(0, 10))
         ctk.CTkLabel(title_f, text="HISTORIAL",   text_color=T.GREEN_PRIMARY, font=T.bold(24)).pack(side="left")
-        ctk.CTkLabel(title_f, text=" / USUARIOS", text_color=T.WHITE,         font=T.bold(24)).pack(side="left")
+        ctk.CTkLabel(title_f, text=" / ANÁLISIS", text_color=T.WHITE,         font=T.bold(24)).pack(side="left")
 
-        sessions = load_sessions()
+        sessions      = load_sessions()
+        group_reports = load_group_reports()
 
         scroll = ctk.CTkScrollableFrame(self, fg_color="transparent")
         scroll.pack(fill="both", expand=True, padx=40, pady=(0, 6))
 
-        if not sessions:
-            ctk.CTkLabel(scroll, text="No hay análisis registrados aún.",
-                         text_color=T.TEXT_DARKER, font=T.font(14)).pack(pady=40)
-        else:
+        # ── Sección grupos ────────────────────────────────────────────────────
+        if group_reports:
+            self._section_label(scroll, "Grupos evaluados")
+            for i, gr in enumerate(group_reports):
+                self._group_card(scroll, i + 1, gr)
+
+        # ── Sección individuales ──────────────────────────────────────────────
+        if sessions:
+            self._section_label(scroll, "Análisis individuales")
             for i, s in enumerate(reversed(sessions)):
                 self._session_card(scroll, i + 1, s)
 
+        if not sessions and not group_reports:
+            ctk.CTkLabel(scroll, text="No hay análisis registrados aún.",
+                         text_color=T.TEXT_DARKER, font=T.font(14)).pack(pady=40)
+
         ctk.CTkLabel(
             self,
-            text=f"Total de análisis: {len(sessions)}",
+            text=f"Grupos: {len(group_reports)}   ·   Sesiones individuales: {len(sessions)}",
             text_color=T.GREEN_PRIMARY, font=T.font(12),
         ).pack(pady=(0, 14))
+
+    def _section_label(self, parent, text: str):
+        row = ctk.CTkFrame(parent, fg_color="transparent")
+        row.pack(fill="x", pady=(12, 4))
+        ctk.CTkLabel(row, text=text, text_color=T.TEXT_MID,
+                     font=T.bold(12)).pack(side="left")
+        sep = ctk.CTkFrame(row, fg_color=T.BG_HOVER, height=1)
+        sep.pack(side="left", fill="x", expand=True, padx=(8, 0), pady=(2, 0))
+
+    # ── Tarjeta de grupo ──────────────────────────────────────────────────────
+
+    def _group_card(self, parent, num: int, report: dict):
+        card = ctk.CTkFrame(parent, fg_color="#0d1f2d", corner_radius=T.CORNER_RADIUS_CARD)
+        card.pack(fill="x", pady=4)
+
+        inner = ctk.CTkFrame(card, fg_color="transparent")
+        inner.pack(fill="both", expand=True, padx=12, pady=10)
+
+        # Badge número
+        badge = ctk.CTkFrame(inner, fg_color="#0a2a3a", corner_radius=10, width=34, height=34)
+        badge.pack_propagate(False)
+        badge.pack(side="left", padx=(0, 8))
+        ctk.CTkLabel(badge, text=str(num), text_color="#4fc3f7", font=T.bold(13)).pack(expand=True)
+
+        # Ícono grupo (azul para diferenciar de individuales)
+        icon_box = ctk.CTkFrame(inner, fg_color="#0a2a3a", corner_radius=22, width=44, height=44)
+        icon_box.pack_propagate(False)
+        icon_box.pack(side="left", padx=(0, 12))
+        if self._ico_grupo:
+            ctk.CTkLabel(icon_box, image=self._ico_grupo, text="").pack(expand=True)
+
+        # Info del grupo
+        info = ctk.CTkFrame(inner, fg_color="transparent")
+        info.pack(side="left", fill="both", expand=True)
+
+        ctk.CTkLabel(info,
+                     text=report.get("group_name", "Grupo"),
+                     text_color=T.WHITE, font=T.bold(14), anchor="w").pack(anchor="w")
+
+        persons_txt = "  ·  ".join(report.get("persons", []))
+        ctk.CTkLabel(info,
+                     text=f"👥 {persons_txt}",
+                     text_color="#4fc3f7", font=T.font(11),
+                     wraplength=380, justify="left", anchor="w").pack(anchor="w")
+
+        detail = ctk.CTkFrame(info, fg_color="transparent")
+        detail.pack(anchor="w")
+        ctk.CTkLabel(detail, text=f"🗓 {report.get('date', '')}",
+                     text_color=T.TEXT_DIM, font=T.font(11)).pack(side="left", padx=(0, 10))
+        ctk.CTkLabel(detail, text=f"🕐 {report.get('time', '')}",
+                     text_color=T.TEXT_DIM, font=T.font(11)).pack(side="left", padx=(0, 10))
+        ctk.CTkLabel(detail, text=f"📋 {len(report.get('records', []))} registros",
+                     text_color=T.TEXT_DIM, font=T.font(11)).pack(side="left")
+
+        # Botones
+        btns_frame = ctk.CTkFrame(inner, fg_color="transparent")
+        btns_frame.pack(side="right")
+
+        btn_excel = ctk.CTkButton(
+            btns_frame,
+            text="", image=self._ico_excel,
+            width=46, height=46,
+            fg_color=T.BG_GREEN_DARK, hover_color=T.BG_GREEN_HOVER,
+            corner_radius=T.CORNER_RADIUS_BTN,
+            anchor="center",
+            command=lambda r=report: self._export_group_excel(r),
+        )
+        btn_excel.pack(side="left", padx=(0, 6))
+        Tooltip(btn_excel, "Descargar reporte Excel del grupo")
+
+        btn_zip = ctk.CTkButton(
+            btns_frame,
+            text="", image=self._ico_zip,
+            width=46, height=46,
+            fg_color=T.BG_BUTTON, hover_color=T.BG_HOVER,
+            corner_radius=T.CORNER_RADIUS_BTN,
+            anchor="center",
+            command=lambda r=report: self._download_group(r),
+        )
+        btn_zip.pack(side="left", padx=(0, 6))
+        Tooltip(btn_zip, "Descargar CSV del grupo (.zip)")
+
+        btn_del = ctk.CTkButton(
+            btns_frame,
+            text="", image=self._ico_delete,
+            width=46, height=46,
+            fg_color=T.BG_RED_EXIT, hover_color="#3d1010",
+            corner_radius=T.CORNER_RADIUS_BTN,
+            anchor="center",
+            command=lambda r=report: self._confirm_delete_group(r),
+        )
+        btn_del.pack(side="left")
+        Tooltip(btn_del, "Eliminar reporte de grupo")
+
+    # ── Tarjeta individual ────────────────────────────────────────────────────
 
     def _session_card(self, parent, num: int, session: dict):
         card = ctk.CTkFrame(parent, fg_color=T.BG_DARK, corner_radius=T.CORNER_RADIUS_CARD, height=T.HEIGHT_CARD)
@@ -100,20 +205,17 @@ class HistoryPage(ctk.CTkFrame):
         inner = ctk.CTkFrame(card, fg_color="transparent")
         inner.pack(fill="both", expand=True, padx=12, pady=10)
 
-        # Badge de número
         badge = ctk.CTkFrame(inner, fg_color=T.BG_ICON_GREEN, corner_radius=10, width=34, height=34)
         badge.pack_propagate(False)
         badge.pack(side="left", padx=(0, 8))
         ctk.CTkLabel(badge, text=str(num), text_color=T.GREEN_PRIMARY, font=T.bold(13)).pack(expand=True)
 
-        # Ícono de usuario
         icon_box = ctk.CTkFrame(inner, fg_color=T.BG_GREEN_DIM, corner_radius=22, width=44, height=44)
         icon_box.pack_propagate(False)
         icon_box.pack(side="left", padx=(0, 12))
         if self._ico_usuario:
             ctk.CTkLabel(icon_box, image=self._ico_usuario, text="").pack(expand=True)
 
-        # Info
         info = ctk.CTkFrame(inner, fg_color="transparent")
         info.pack(side="left", fill="both", expand=True)
         ctk.CTkLabel(info, text=session.get("name", "—"),
@@ -128,7 +230,6 @@ class HistoryPage(ctk.CTkFrame):
         ctk.CTkLabel(detail, text=f"🕑 Fin: {session.get('end_time', '—')}",
                      text_color=T.TEXT_DIM, font=T.font(11)).pack(side="left")
 
-        # Botones de descarga (solo icono)
         btns_frame = ctk.CTkFrame(inner, fg_color="transparent")
         btns_frame.pack(side="right")
 
@@ -168,6 +269,8 @@ class HistoryPage(ctk.CTkFrame):
         btn_del.pack(side="left")
         Tooltip(btn_del, "Eliminar análisis")
 
+    # ── Eliminación ───────────────────────────────────────────────────────────
+
     def _confirm_delete(self, session: dict):
         name = session.get("name", "—")
         date = session.get("date", "")
@@ -183,8 +286,24 @@ class HistoryPage(ctk.CTkFrame):
         else:
             mb.showerror("Error", "No se pudo eliminar el análisis.\nVerifica la conexión con el servidor.")
 
+    def _confirm_delete_group(self, report: dict):
+        group = report.get("group_name", "—")
+        date  = report.get("date", "")
+        ok = mb.askyesno(
+            "Eliminar reporte de grupo",
+            f"¿Eliminar el reporte del grupo '{group}' ({date})?\n\nEsta acción no se puede deshacer.",
+            icon="warning",
+        )
+        if not ok:
+            return
+        if delete_group_report(report.get("filepath", "")):
+            self._app.show_history()
+        else:
+            mb.showerror("Error", "No se pudo eliminar el reporte.")
+
+    # ── Helpers API ───────────────────────────────────────────────────────────
+
     def _fetch_registros(self, session_id: str) -> list:
-        """Obtiene los registros de una sesión desde el API."""
         try:
             r = API_SESSION.post(
                 f"{API_BASE_URL}/api/consultas/ejecutarconsultaparametrizada",
@@ -201,7 +320,7 @@ class HistoryPage(ctk.CTkFrame):
             pass
         return []
 
-    # ── Exportación Excel ─────────────────────────────────────────────────────
+    # ── Exportación Excel individual ──────────────────────────────────────────
 
     def _export_excel(self, session: dict):
         rows = self._fetch_registros(session.get("id", ""))
@@ -223,44 +342,54 @@ class HistoryPage(ctk.CTkFrame):
 
         try:
             import openpyxl
-            from openpyxl.styles import Font, PatternFill, Alignment
+            from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 
             wb = openpyxl.Workbook()
             ws = wb.active
             ws.title = "Resultados"
 
-            headers = ["Pregunta", "Respuesta", "Respuesta correcta", "Emoción", "Confianza (%)", "Timestamp"]
+            headers  = ["Pregunta", "Respuesta (1/0)", "Respuesta correcta", "Emoción", "Confianza (%)", "Timestamp"]
             hdr_fill = PatternFill("solid", fgColor="1a3a1a")
-            hdr_font = Font(bold=True, color="00e676")
+            hdr_font = Font(bold=True, color="FFFFFF")
+            thin     = Side(style="thin", color="CCCCCC")
+            border   = Border(left=thin, right=thin, top=thin, bottom=thin)
+
             for col, h in enumerate(headers, 1):
                 cell           = ws.cell(row=1, column=col, value=h)
                 cell.font      = hdr_font
                 cell.fill      = hdr_fill
-                cell.alignment = Alignment(horizontal="center")
+                cell.alignment = Alignment(horizontal="center", vertical="center")
+                cell.border    = border
+            ws.row_dimensions[1].height = 20
 
             for r_idx, row in enumerate(rows, 2):
                 respondio      = row.get("respondio", False)
                 correct_answer = row.get("respuesta_correcta", "") if respondio else ""
-
-                ws.cell(row=r_idx, column=1, value=row.get("pregunta", ""))
-                ws.cell(row=r_idx, column=2, value=1 if respondio else 0)
-                ws.cell(row=r_idx, column=3, value=correct_answer)
-                ws.cell(row=r_idx, column=4, value=row.get("emocion", ""))
+                conf = 0
                 try:
-                    ws.cell(row=r_idx, column=5, value=float(row.get("prob_emocion", 0)))
+                    conf = round(float(row.get("prob_emocion", 0)), 2)
                 except (ValueError, TypeError):
-                    ws.cell(row=r_idx, column=5, value=0)
-                ws.cell(row=r_idx, column=6, value=str(row.get("timestamp", "")))
+                    pass
 
-                fill_color = "0d2b0d" if respondio else "2b0d0d"
+                valores    = [row.get("pregunta", ""), 1 if respondio else 0,
+                              correct_answer, row.get("emocion", ""), conf,
+                              str(row.get("timestamp", ""))]
+                fill_color = "D6EAD6" if respondio else "FAD7D7"
                 row_fill   = PatternFill("solid", fgColor=fill_color)
-                for col in range(1, 7):
-                    ws.cell(row=r_idx, column=col).fill = row_fill
 
-            col_widths = [50, 12, 40, 18, 16, 28]
+                for col, val in enumerate(valores, 1):
+                    cell           = ws.cell(row=r_idx, column=col, value=val)
+                    cell.fill      = row_fill
+                    cell.border    = border
+                    cell.alignment = Alignment(vertical="center",
+                                               horizontal="center" if col in (2, 4, 5, 6) else "left")
+                    cell.font      = Font(color="000000")
+
+            col_widths = [46, 16, 38, 14, 14, 26]
             for col, width in enumerate(col_widths, 1):
                 ws.column_dimensions[openpyxl.utils.get_column_letter(col)].width = width
 
+            ws.freeze_panes = "A2"
             wb.save(save_path)
             mb.showinfo("Exportación completa", f"Excel guardado en:\n{save_path}")
         except ImportError:
@@ -272,7 +401,153 @@ class HistoryPage(ctk.CTkFrame):
         except Exception as exc:
             mb.showerror("Error", f"No se pudo crear el Excel:\n{exc}")
 
-    # ── Descarga ZIP ──────────────────────────────────────────────────────────
+    # ── Descarga ZIP de grupo ─────────────────────────────────────────────────
+
+    def _download_group(self, report: dict):
+        records    = report.get("records", [])
+        group_safe = report.get("group_name", "grupo").replace(" ", "_")
+        default_name = f"grupo_{group_safe}_{report.get('date', '')}.zip"
+
+        save_path = fd.asksaveasfilename(
+            defaultextension=".zip",
+            filetypes=[("ZIP file", "*.zip")],
+            initialfile=default_name,
+            title="Guardar reporte de grupo como ZIP",
+        )
+        if not save_path:
+            return
+
+        try:
+            csv_buffer = io.StringIO()
+            writer = csv.writer(csv_buffer)
+            writer.writerow(["persona", "pregunta", "respuesta_correcta",
+                              "emocion", "prob_emocion", "respondio", "timestamp"])
+            for rec in records:
+                respondio = rec.get("respondio", "")
+                is_true   = str(respondio).lower() in ("true", "1", "yes")
+                writer.writerow([
+                    rec.get("persona", ""),
+                    rec.get("pregunta", ""),
+                    rec.get("respuesta_correcta", ""),
+                    rec.get("emocion", ""),
+                    rec.get("prob_emocion", ""),
+                    1 if is_true else 0,
+                    rec.get("timestamp", ""),
+                ])
+
+            with zipfile.ZipFile(save_path, "w", zipfile.ZIP_DEFLATED) as zf:
+                zf.writestr("registros_grupo.csv", csv_buffer.getvalue())
+
+            mb.showinfo("Descarga completa", f"Reporte del grupo guardado en:\n{save_path}")
+        except Exception as exc:
+            mb.showerror("Error", f"No se pudo crear el ZIP:\n{exc}")
+
+    # ── Exportación Excel de grupo ────────────────────────────────────────────
+
+    def _export_group_excel(self, report: dict):
+        records = report.get("records", [])
+        if not records:
+            mb.showerror("Error", "No hay registros en este reporte de grupo.")
+            return
+
+        group_safe   = report.get("group_name", "grupo").replace(" ", "_")
+        default_name = f"grupo_{group_safe}_{report.get('date', '')}.xlsx"
+
+        save_path = fd.asksaveasfilename(
+            defaultextension=".xlsx",
+            filetypes=[("Excel", "*.xlsx")],
+            initialfile=default_name,
+            title="Guardar reporte Excel del grupo",
+        )
+        if not save_path:
+            return
+
+        try:
+            import openpyxl
+            from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+
+            wb = openpyxl.Workbook()
+            ws = wb.active
+            ws.title = "Grupo"
+
+            # Cabecera con fondo verde oscuro y texto blanco
+            headers  = ["Persona", "Pregunta", "Respuesta (1/0)", "Respuesta correcta",
+                        "Emoción", "Confianza (%)", "Timestamp"]
+            hdr_fill = PatternFill("solid", fgColor="1a3a1a")
+            hdr_font = Font(bold=True, color="FFFFFF")
+            thin     = Side(style="thin", color="CCCCCC")
+            border   = Border(left=thin, right=thin, top=thin, bottom=thin)
+
+            for col, h in enumerate(headers, 1):
+                cell           = ws.cell(row=1, column=col, value=h)
+                cell.font      = hdr_font
+                cell.fill      = hdr_fill
+                cell.alignment = Alignment(horizontal="center", vertical="center")
+                cell.border    = border
+            ws.row_dimensions[1].height = 20
+
+            # Colores pastel claros por persona (legibles sobre fondo claro)
+            person_colors = [
+                "D6EAD6",  # verde pastel
+                "D6E4F0",  # azul pastel
+                "FFF3CD",  # amarillo pastel
+                "F5D5E0",  # rosa pastel
+                "E8D5F5",  # violeta pastel
+                "D5F0EE",  # turquesa pastel
+                "FFE0CC",  # naranja pastel
+                "E0E0E0",  # gris pastel
+            ]
+            person_list  = report.get("persons", [])
+            person_index = {p: i for i, p in enumerate(person_list)}
+
+            for r_idx, rec in enumerate(records, 2):
+                persona   = rec.get("persona", "")
+                respondio = rec.get("respondio", "")
+                is_true   = str(respondio).lower() in ("true", "1", "yes")
+
+                valores = [
+                    persona,
+                    rec.get("pregunta", ""),
+                    1 if is_true else 0,
+                    rec.get("respuesta_correcta", "") if is_true else "",
+                    rec.get("emocion", ""),
+                    0,
+                    str(rec.get("timestamp", "")),
+                ]
+                try:
+                    valores[5] = round(float(rec.get("prob_emocion", 0)), 2)
+                except (ValueError, TypeError):
+                    pass
+
+                p_idx    = person_index.get(persona, 0) % len(person_colors)
+                row_fill = PatternFill("solid", fgColor=person_colors[p_idx])
+
+                for col, val in enumerate(valores, 1):
+                    cell           = ws.cell(row=r_idx, column=col, value=val)
+                    cell.fill      = row_fill
+                    cell.border    = border
+                    cell.alignment = Alignment(vertical="center",
+                                               horizontal="center" if col in (3, 5, 6, 7) else "left")
+                    cell.font      = Font(color="000000")
+
+            col_widths = [18, 46, 16, 38, 14, 14, 26]
+            for col, width in enumerate(col_widths, 1):
+                ws.column_dimensions[openpyxl.utils.get_column_letter(col)].width = width
+
+            ws.freeze_panes = "A2"
+
+            wb.save(save_path)
+            mb.showinfo("Exportación completa", f"Excel del grupo guardado en:\n{save_path}")
+        except ImportError:
+            mb.showerror(
+                "Módulo faltante",
+                "Se requiere 'openpyxl' para exportar Excel.\n"
+                "Instálalo con: pip install openpyxl",
+            )
+        except Exception as exc:
+            mb.showerror("Error", f"No se pudo crear el Excel:\n{exc}")
+
+    # ── Descarga ZIP individual ───────────────────────────────────────────────
 
     def _download(self, session: dict):
         sid          = session.get("id", "")

@@ -2,6 +2,8 @@
 model/session_manager.py — Persistencia de sesiones via API + directorio local para imágenes.
 """
 import os
+import re
+import csv
 import uuid
 import datetime
 import threading
@@ -40,6 +42,56 @@ def load_sessions() -> list:
         return result
     except Exception:
         return []
+
+
+def load_group_reports() -> list:
+    """Lee los CSVs de grupo guardados localmente en DATASET_DIR/grupos/."""
+    grupos_dir = os.path.join(DATASET_DIR, "grupos")
+    if not os.path.isdir(grupos_dir):
+        return []
+
+    reports = []
+    pattern = re.compile(r'^grupo_(.+)_(\d{4}-\d{2}-\d{2})_(\d{2}-\d{2}-\d{2})\.csv$')
+    for fname in os.listdir(grupos_dir):
+        m = pattern.match(fname)
+        if not m:
+            continue
+        fpath      = os.path.join(grupos_dir, fname)
+        group_name = m.group(1)
+        date_str   = m.group(2)
+        time_str   = m.group(3).replace("-", ":")
+        try:
+            with open(fpath, "r", encoding="utf-8") as f:
+                records = list(csv.DictReader(f))
+        except Exception:
+            continue
+        # Personas en el orden en que aparecen (sin duplicados)
+        seen, persons = set(), []
+        for rec in records:
+            p = rec.get("persona", "")
+            if p and p not in seen:
+                seen.add(p)
+                persons.append(p)
+        reports.append({
+            "id":         fname,
+            "filepath":   fpath,
+            "group_name": group_name,
+            "date":       date_str,
+            "time":       time_str,
+            "persons":    persons,
+            "records":    records,
+        })
+
+    return sorted(reports, key=lambda x: (x["date"], x["time"]), reverse=True)
+
+
+def delete_group_report(filepath: str) -> bool:
+    """Elimina un archivo de reporte de grupo."""
+    try:
+        os.remove(filepath)
+        return True
+    except Exception:
+        return False
 
 
 def create_session(name: str, questions: list, question_group: str = None) -> dict:
