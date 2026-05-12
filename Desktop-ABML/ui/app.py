@@ -79,5 +79,7 @@ class App(ctk.CTk):
         self._page.pack(fill="both", expand=True)
 
     def _on_close(self):
+        if self._page and hasattr(self._page, "_cleanup_on_close"):
+            self._page._cleanup_on_close()
         self._clear()
         self.destroy()
