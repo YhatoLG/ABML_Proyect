@@ -368,55 +368,8 @@ namespace ApiGenericaCsharp.Controllers
             }
             catch (Exception excepcionGeneral)
             {
-                // ERRORES INESPERADOS/CRÍTICOS (500 INTERNAL SERVER ERROR)
-                // Cualquier error que no se manejó específicamente en las categorías anteriores:
-                // - Errores de programación no anticipados (NullReference, etc.)
-                // - Problemas de infraestructura (falta de memoria, disco lleno, etc.)
-                // - Errores de configuración críticos del sistema
-                // - Fallas de red o servicios externos inesperadas
-                // - Bugs en el código que requieren investigación inmediata
-
-                // Logging como Error crítico para investigación técnica inmediata
-                // Se incluye la excepción completa con stack trace para debugging
-                _logger.LogError(excepcionGeneral,
-                    "ERROR CRÍTICO - Falla inesperada en consulta - Tabla: {Tabla}",
-                    tabla              // Tabla donde ocurrió el error crítico
-                );
-
-                // Construir mensaje de error más informativo para debugging
-                var detalleError = new System.Text.StringBuilder();
-                detalleError.AppendLine($"Tipo de error: {excepcionGeneral.GetType().Name}");
-                detalleError.AppendLine($"Mensaje: {excepcionGeneral.Message}");
-
-                if (excepcionGeneral.InnerException != null)
-                {
-                    detalleError.AppendLine($"Error interno: {excepcionGeneral.InnerException.Message}");
-                }
-
-                // Agregar información del stack trace (solo las primeras 3 líneas para no saturar)
-                if (!string.IsNullOrEmpty(excepcionGeneral.StackTrace))
-                {
-                    var stackLines = excepcionGeneral.StackTrace.Split('\n').Take(3);
-                    detalleError.AppendLine("Stack trace:");
-                    foreach (var line in stackLines)
-                    {
-                        detalleError.AppendLine($"  {line.Trim()}");
-                    }
-                }
-
-                // Respuesta 500 Internal Server Error con detalles útiles
-                return StatusCode(500, new
-                {
-                    estado = 500,                                        // Código de estado HTTP explícito
-                    mensaje = "Error interno del servidor al consultar tabla.",
-                    tabla = tabla,                                       // Contexto de la operación
-                    tipoError = excepcionGeneral.GetType().Name,        // Tipo de excepción
-                    detalle = excepcionGeneral.Message,                 // Mensaje principal
-                    detalleCompleto = detalleError.ToString(),          // Desglose completo
-                    errorInterno = excepcionGeneral.InnerException?.Message,
-                    timestamp = DateTime.UtcNow,                        // Timestamp para correlación
-                    sugerencia = "Revise los logs del servidor para más detalles o contacte al administrador."
-                });
+                _logger.LogError(excepcionGeneral, "ERROR CRÍTICO - consulta - Tabla: {Tabla}", tabla);
+                return Error500(excepcionGeneral, tabla);
             }
         }
 
@@ -510,30 +463,8 @@ namespace ApiGenericaCsharp.Controllers
             }
             catch (Exception excepcionGeneral)
             {
-                _logger.LogError(excepcionGeneral,
-                    "ERROR CRÍTICO - Falla en filtrado - Tabla: {Tabla}, Clave: {Clave}, Valor: {Valor}",
-                    tabla, nombreClave, valor
-                );
-
-                var detalleError = new System.Text.StringBuilder();
-                detalleError.AppendLine($"Tipo: {excepcionGeneral.GetType().Name}");
-                detalleError.AppendLine($"Mensaje: {excepcionGeneral.Message}");
-                if (excepcionGeneral.InnerException != null)
-                    detalleError.AppendLine($"Error interno: {excepcionGeneral.InnerException.Message}");
-
-                return StatusCode(500, new
-                {
-                    estado = 500,
-                    mensaje = "Error interno del servidor al filtrar registros.",
-                    tabla = tabla,
-                    filtro = $"{nombreClave} = {valor}",
-                    tipoError = excepcionGeneral.GetType().Name,
-                    detalle = excepcionGeneral.Message,
-                    detalleCompleto = detalleError.ToString(),
-                    errorInterno = excepcionGeneral.InnerException?.Message,
-                    timestamp = DateTime.UtcNow,
-                    sugerencia = "Revise los logs para más detalles."
-                });
+                _logger.LogError(excepcionGeneral, "ERROR CRÍTICO - filtrado - Tabla: {Tabla}, {Clave}={Valor}", tabla, nombreClave, valor);
+                return Error500(excepcionGeneral, tabla);
             }
         }
 
@@ -572,21 +503,8 @@ namespace ApiGenericaCsharp.Controllers
                     });
                 }
 
-                // CONVERSIÓN DE JsonElement A TIPOS NATIVOS
-                var datosConvertidos = new Dictionary<string, object?>();
-                foreach (var kvp in datosEntidad)
-                {
-                    if (kvp.Value is JsonElement elemento)
-                    {
-                        datosConvertidos[kvp.Key] = ConvertirJsonElement(elemento);
-                    }
-                    else
-                    {
-                        datosConvertidos[kvp.Key] = kvp.Value;
-                    }
-                }
+                var datosConvertidos = ConvertirDatos(datosEntidad);
 
-                // DELEGACIÓN AL SERVICIO (aplicando SRP y DIP)
                 bool creado = await _servicioCrud.CrearAsync(tabla, esquema, datosConvertidos, camposEncriptar);
 
                 if (creado)
@@ -661,29 +579,8 @@ namespace ApiGenericaCsharp.Controllers
             }
             catch (Exception excepcionGeneral)
             {
-                _logger.LogError(excepcionGeneral,
-                    "ERROR CRÍTICO - Falla en creación - Tabla: {Tabla}",
-                    tabla
-                );
-
-                var detalleError = new System.Text.StringBuilder();
-                detalleError.AppendLine($"Tipo: {excepcionGeneral.GetType().Name}");
-                detalleError.AppendLine($"Mensaje: {excepcionGeneral.Message}");
-                if (excepcionGeneral.InnerException != null)
-                    detalleError.AppendLine($"Error interno: {excepcionGeneral.InnerException.Message}");
-
-                return StatusCode(500, new
-                {
-                    estado = 500,
-                    mensaje = "Error interno del servidor al crear registro.",
-                    tabla = tabla,
-                    tipoError = excepcionGeneral.GetType().Name,
-                    detalle = excepcionGeneral.Message,
-                    detalleCompleto = detalleError.ToString(),
-                    errorInterno = excepcionGeneral.InnerException?.Message,
-                    timestamp = DateTime.UtcNow,
-                    sugerencia = "Revise los logs para más detalles."
-                });
+                _logger.LogError(excepcionGeneral, "ERROR CRÍTICO - creación - Tabla: {Tabla}", tabla);
+                return Error500(excepcionGeneral, tabla);
             }
         }
 
@@ -725,22 +622,8 @@ namespace ApiGenericaCsharp.Controllers
                     });
                 }
 
-                // CONVERSIÓN DE JsonElement A TIPOS NATIVOS
-                // Reutilizar la misma lógica que en CrearAsync
-                var datosConvertidos = new Dictionary<string, object?>();
-                foreach (var kvp in datosEntidad)
-                {
-                    if (kvp.Value is JsonElement elemento)
-                    {
-                        datosConvertidos[kvp.Key] = ConvertirJsonElement(elemento);
-                    }
-                    else
-                    {
-                        datosConvertidos[kvp.Key] = kvp.Value;
-                    }
-                }
+                var datosConvertidos = ConvertirDatos(datosEntidad);
 
-                // DELEGACIÓN AL SERVICIO (aplicando SRP y DIP)
                 int filasAfectadas = await _servicioCrud.ActualizarAsync(
                     tabla, esquema, nombreClave, valorClave, datosConvertidos, camposEncriptar
                 );
@@ -827,30 +710,8 @@ namespace ApiGenericaCsharp.Controllers
             }
             catch (Exception excepcionGeneral)
             {
-                _logger.LogError(excepcionGeneral,
-                    "ERROR CRÍTICO - Falla en actualización - Tabla: {Tabla}, Clave: {Clave}={Valor}",
-                    tabla, nombreClave, valorClave
-                );
-
-                var detalleError = new System.Text.StringBuilder();
-                detalleError.AppendLine($"Tipo: {excepcionGeneral.GetType().Name}");
-                detalleError.AppendLine($"Mensaje: {excepcionGeneral.Message}");
-                if (excepcionGeneral.InnerException != null)
-                    detalleError.AppendLine($"Error interno: {excepcionGeneral.InnerException.Message}");
-
-                return StatusCode(500, new
-                {
-                    estado = 500,
-                    mensaje = "Error interno del servidor al actualizar registro.",
-                    tabla = tabla,
-                    filtro = $"{nombreClave} = {valorClave}",
-                    tipoError = excepcionGeneral.GetType().Name,
-                    detalle = excepcionGeneral.Message,
-                    detalleCompleto = detalleError.ToString(),
-                    errorInterno = excepcionGeneral.InnerException?.Message,
-                    timestamp = DateTime.UtcNow,
-                    sugerencia = "Revise los logs para más detalles."
-                });
+                _logger.LogError(excepcionGeneral, "ERROR CRÍTICO - actualización - Tabla: {Tabla}, {Clave}={Valor}", tabla, nombreClave, valorClave);
+                return Error500(excepcionGeneral, tabla);
             }
         }
 
@@ -962,30 +823,8 @@ namespace ApiGenericaCsharp.Controllers
             }
             catch (Exception excepcionGeneral)
             {
-                _logger.LogError(excepcionGeneral,
-                    "ERROR CRÍTICO - Falla en eliminación - Tabla: {Tabla}, Clave: {Clave}={Valor}",
-                    tabla, nombreClave, valorClave
-                );
-
-                var detalleError = new System.Text.StringBuilder();
-                detalleError.AppendLine($"Tipo: {excepcionGeneral.GetType().Name}");
-                detalleError.AppendLine($"Mensaje: {excepcionGeneral.Message}");
-                if (excepcionGeneral.InnerException != null)
-                    detalleError.AppendLine($"Error interno: {excepcionGeneral.InnerException.Message}");
-
-                return StatusCode(500, new
-                {
-                    estado = 500,
-                    mensaje = "Error interno del servidor al eliminar registro.",
-                    tabla = tabla,
-                    filtro = $"{nombreClave} = {valorClave}",
-                    tipoError = excepcionGeneral.GetType().Name,
-                    detalle = excepcionGeneral.Message,
-                    detalleCompleto = detalleError.ToString(),
-                    errorInterno = excepcionGeneral.InnerException?.Message,
-                    timestamp = DateTime.UtcNow,
-                    sugerencia = "Revise los logs para más detalles."
-                });
+                _logger.LogError(excepcionGeneral, "ERROR CRÍTICO - eliminación - Tabla: {Tabla}, {Clave}={Valor}", tabla, nombreClave, valorClave);
+                return Error500(excepcionGeneral, tabla);
             }
         }
 
@@ -1115,43 +954,38 @@ namespace ApiGenericaCsharp.Controllers
         /// - bool para valores booleanos
         /// - null para valores nulos
         /// </returns>
-        private object? ConvertirJsonElement(JsonElement elemento)
+        private object? ConvertirJsonElement(JsonElement elemento) => elemento.ValueKind switch
         {
-            // Usar pattern matching para determinar tipo JSON y convertir apropiadamente
-            return elemento.ValueKind switch
+            JsonValueKind.String => elemento.GetString(),
+            JsonValueKind.Number => elemento.TryGetInt32(out int intValue) ? intValue : elemento.GetDouble(),
+            JsonValueKind.True   => true,
+            JsonValueKind.False  => false,
+            JsonValueKind.Null   => null,
+            JsonValueKind.Object => elemento.GetRawText(),
+            JsonValueKind.Array  => elemento.GetRawText(),
+            _                    => elemento.ToString()
+        };
+
+        // Convierte todos los valores JsonElement de un diccionario a tipos nativos .NET para Dapper/SQL.
+        private Dictionary<string, object?> ConvertirDatos(Dictionary<string, object?> datos) =>
+            datos.ToDictionary(
+                kvp => kvp.Key,
+                kvp => kvp.Value is JsonElement e ? ConvertirJsonElement(e) : kvp.Value
+            );
+
+        // Construye una respuesta 500 uniforme. Llamar después de LogError para no perder el stack trace.
+        private IActionResult Error500(Exception ex, string tabla) =>
+            StatusCode(500, new
             {
-                // JSON "texto" → C# string
-                // Ejemplo: {"nombre": "Juan"} → nombre = "Juan" (string)
-                JsonValueKind.String => elemento.GetString(),
-
-                // JSON number → C# int o double
-                // Estrategia: intentar int primero, si no cabe usar double
-                // Ejemplo: {"edad": 25} → edad = 25 (int)
-                // Ejemplo: {"precio": 99.99} → precio = 99.99 (double)
-                JsonValueKind.Number => elemento.TryGetInt32(out int intValue)
-                    ? intValue           // Número entero válido para int
-                    : elemento.GetDouble(),  // Número decimal o muy grande
-
-                // JSON booleanos → C# bool
-                // Ejemplo: {"activo": true} → activo = true (bool)
-                JsonValueKind.True => true,
-                JsonValueKind.False => false,
-
-                // JSON null → C# null (compatible con campos nullable de SQL)
-                // Ejemplo: {"descripcion": null} → descripcion = null
-                JsonValueKind.Null => null,
-
-                // CASOS COMPLEJOS: objetos y arrays JSON → string serializado
-                // Esto permite almacenar JSON complejo como texto en campos VARCHAR
-                // Ejemplo: {"config": {"tema": "dark"}} → config = "{\"tema\":\"dark\"}"
-                JsonValueKind.Object => elemento.GetRawText(),
-                JsonValueKind.Array => elemento.GetRawText(),
-
-                // FALLBACK SEGURO: cualquier otro caso → string
-                // Garantiza que siempre devolvemos algo utilizable
-                _ => elemento.ToString()
-            };
-        }
+                estado       = 500,
+                mensaje      = "Error interno del servidor.",
+                tabla,
+                tipoError    = ex.GetType().Name,
+                detalle      = ex.Message,
+                errorInterno = ex.InnerException?.Message,
+                timestamp    = DateTime.UtcNow,
+                sugerencia   = "Revise los logs del servidor para más detalles."
+            });
 
         /// <summary>
         /// Verifica las credenciales de un usuario comparando contraseña con hash almacenado.
@@ -1186,19 +1020,7 @@ namespace ApiGenericaCsharp.Controllers
                     });
                 }
 
-                // CONVERSIÓN DE JsonElement A TIPOS NATIVOS
-                var datosConvertidos = new Dictionary<string, object?>();
-                foreach (var kvp in datos)
-                {
-                    if (kvp.Value is JsonElement elemento)
-                    {
-                        datosConvertidos[kvp.Key] = ConvertirJsonElement(elemento);
-                    }
-                    else
-                    {
-                        datosConvertidos[kvp.Key] = kvp.Value;
-                    }
-                }
+                var datosConvertidos = ConvertirDatos(datos);
 
                 // VALIDACIÓN DE PARÁMETROS ESPECÍFICOS PARA VERIFICACIÓN
                 var parametrosRequeridos = new[] { "campoUsuario", "campoContrasena", "valorUsuario", "valorContrasena" };
@@ -1314,91 +1136,11 @@ namespace ApiGenericaCsharp.Controllers
             }
             catch (Exception excepcionGeneral)
             {
-                _logger.LogError(excepcionGeneral,
-                    "ERROR CRÍTICO - Falla en verificación de credenciales - Tabla: {Tabla}",
-                    tabla
-                );
-
-                var detalleError = new System.Text.StringBuilder();
-                detalleError.AppendLine($"Tipo: {excepcionGeneral.GetType().Name}");
-                detalleError.AppendLine($"Mensaje: {excepcionGeneral.Message}");
-                if (excepcionGeneral.InnerException != null)
-                    detalleError.AppendLine($"Error interno: {excepcionGeneral.InnerException.Message}");
-
-                return StatusCode(500, new
-                {
-                    estado = 500,
-                    mensaje = "Error interno del servidor al verificar credenciales.",
-                    tabla = tabla,
-                    tipoError = excepcionGeneral.GetType().Name,
-                    detalle = excepcionGeneral.Message,
-                    detalleCompleto = detalleError.ToString(),
-                    errorInterno = excepcionGeneral.InnerException?.Message,
-                    timestamp = DateTime.UtcNow,
-                    sugerencia = "Revise los logs para más detalles."
-                });
+                _logger.LogError(excepcionGeneral, "ERROR CRÍTICO - verificación credenciales - Tabla: {Tabla}", tabla);
+                return Error500(excepcionGeneral, tabla);
             }
         }
 
-        // aquí se puede agregar más endpoints en el futuro (DELETE, PATCH, etc.)
 
     }
 }
-
-// NOTAS PEDAGÓGICAS para el tutorial:
-//
-// 1. ESTA ES LA CAPA DE PRESENTACIÓN HTTP:
-//    - Su única responsabilidad es manejar la comunicación HTTP ↔ Lógica de Negocio
-//    - NO contiene lógica de negocio (eso está en servicios)
-//    - NO accede directamente a datos (eso está en repositorios)
-//    - Su trabajo es: recibir HTTP, llamar servicio, devolver HTTP
-//
-// 2. PATRÓN API GENÉRICA:
-//    - Un solo controlador maneja múltiples tablas (vs crear UserController, ProductController, etc.)
-//    - Reduce duplicación de código significativamente
-//    - Escalable automáticamente: nuevas tablas funcionan sin código adicional
-//    - Comportamiento consistente para todas las entidades
-//
-// 3. APLICACIÓN PRÁCTICA DE SOLID:
-//    - SRP: Solo coordinación HTTP, cada método tiene una responsabilidad específica
-//    - DIP: Depende de IServicioCrud (abstracción), no de ServicioCrud (implementación)
-//    - OCP: Preparado para agregar nuevos endpoints sin modificar código existente
-//    - ISP: Usa solo los métodos necesarios de IServicioCrud (por ahora solo ListarAsync)
-//
-// 4. MANEJO DE ERRORES ESTRATIFICADO:
-//    - ArgumentException → 400 Bad Request (errores de entrada del usuario)
-//    - InvalidOperationException → 404 Not Found (recurso no existe o no accesible)
-//    - Exception general → 500 Internal Server Error (errores del sistema)
-//    - Cada tipo se maneja con logging y respuesta apropiados
-//
-// 5. LOGGING ESTRUCTURADO:
-//    - LogInformation para operaciones normales exitosas
-//    - LogWarning para errores de entrada del usuario (no críticos)
-//    - LogError para errores que requieren investigación técnica
-//    - Parámetros estructurados facilitan búsquedas y análisis posteriores
-//
-// 6. RESPUESTAS HTTP ENRIQUECIDAS:
-//    - No solo devuelve datos crudos, sino también metadatos útiles
-//    - Información contextual que facilita el uso de la API
-//    - Estructura consistente que se mantiene para todas las operaciones
-//    - Códigos de estado HTTP semánticamente correctos
-//
-// 7. ENDPOINTS AUXILIARES DE DESCUBRIMIENTO:
-//    - /api/info: información técnica sobre capacidades del controlador
-//    - /: página de bienvenida con guía rápida de uso
-//    - Facilitan adopción y uso de la API sin documentación externa
-//
-// 8. ARQUITECTURA COMPLETA EN FUNCIONAMIENTO:
-//    Petición HTTP → EntidadesController → ServicioCrud → RepositorioLectura → Base de Datos
-//    ↑ Presentación  ↑ Coordinación HTTP  ↑ Lógica Negocio ↑ Acceso Datos    ↑ Almacenamiento
-//
-// 9. PREPARADO PARA EXTENSIONES FUTURAS:
-//    - Estructura lista para agregar más endpoints (POST, PUT, DELETE)
-//    - Manejo de errores extensible para nuevos tipos de operaciones
-//    - Logging preparado para auditoría completa de operaciones CRUD
-//
-// 10. TESTING DE ESTE CONTROLADOR:
-//     - IServicioCrud se puede mockear fácilmente para testing unitario
-//     - Cada método devuelve IActionResult que se puede verificar
-//     - Escenarios de error se pueden simular mediante mocks
-//     - Logging se puede verificar usando test loggers
