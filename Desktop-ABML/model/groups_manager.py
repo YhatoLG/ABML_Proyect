@@ -120,27 +120,25 @@ def load_question_group(group_id: int) -> dict:
 
 
 def list_question_groups() -> list:
-    """Retorna todos los grupos con sus preguntas."""
-    grupos = _consulta("SELECT id, nombre FROM grupos_preguntas ORDER BY nombre")
-    result = []
-    for g in grupos:
-        gid    = g["id"]
-        nombre = g["nombre"]
-        _sql = (
-            "SELECT texto, opciones, respuesta_correcta "
-            "FROM preguntas WHERE grupo_id = @gid ORDER BY orden"
-        )
-        preg      = _consulta(_sql, {"gid": gid})
-        questions = [
-            {
-                "text":    p["texto"],
-                "options": _parse_opciones(p.get("opciones")),
-                "correct": p.get("respuesta_correcta", -1),
-            }
-            for p in preg
-        ]
-        result.append({"name": nombre, "questions": questions, "id": gid})
-    return result
+    """Retorna todos los grupos con sus preguntas (consulta única con JOIN)."""
+    rows = _consulta(
+        "SELECT g.id, g.nombre, p.texto, p.opciones, p.respuesta_correcta "
+        "FROM grupos_preguntas g "
+        "LEFT JOIN preguntas p ON p.grupo_id = g.id "
+        "ORDER BY g.nombre, p.orden"
+    )
+    groups: dict = {}
+    for row in rows:
+        gid = row["id"]
+        if gid not in groups:
+            groups[gid] = {"id": gid, "name": row["nombre"], "questions": []}
+        if row.get("texto") is not None:
+            groups[gid]["questions"].append({
+                "text":    row["texto"],
+                "options": _parse_opciones(row.get("opciones")),
+                "correct": row.get("respuesta_correcta", -1),
+            })
+    return list(groups.values())
 
 
 def delete_question_group(group_id: int) -> None:
@@ -214,17 +212,21 @@ def load_person_group(group_id: int) -> dict:
 
 
 def list_person_groups() -> list:
-    """Retorna todos los grupos de personas con sus integrantes."""
-    grupos = _consulta("SELECT id, nombre FROM grupos_personas ORDER BY nombre")
-    result = []
-    for g in grupos:
-        gid  = g["id"]
-        pers = _consulta(
-            "SELECT nombre FROM personas WHERE grupo_id = @gid ORDER BY orden",
-            {"gid": gid}
-        )
-        result.append({"name": g["nombre"], "people": [p["nombre"] for p in pers], "id": gid})
-    return result
+    """Retorna todos los grupos de personas con sus integrantes (consulta única con JOIN)."""
+    rows = _consulta(
+        "SELECT g.id, g.nombre, p.nombre AS persona "
+        "FROM grupos_personas g "
+        "LEFT JOIN personas p ON p.grupo_id = g.id "
+        "ORDER BY g.nombre, p.orden"
+    )
+    groups: dict = {}
+    for row in rows:
+        gid = row["id"]
+        if gid not in groups:
+            groups[gid] = {"id": gid, "name": row["nombre"], "people": []}
+        if row.get("persona") is not None:
+            groups[gid]["people"].append(row["persona"])
+    return list(groups.values())
 
 
 def delete_person_group(group_id: int) -> None:
