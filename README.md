@@ -11,7 +11,7 @@ Sistema de detección de patrones de comportamiento mediante biometría facial c
 - [Descripción general](#descripción-general)
 - [Arquitectura del sistema](#arquitectura-del-sistema)
 - [Diagramas de Secuencia del Sistema (SSD)](#diagramas-de-secuencia-del-sistema-ssd)
-  - [SSD 1 — Autenticación de usuario](#ssd-1--autenticación-de-usuario)
+  - [SSD 1 — Inicio y conexión al sistema](#ssd-1--inicio-y-conexión-al-sistema)
   - [SSD 2 — Configuración de sesión de análisis](#ssd-2--configuración-de-sesión-de-análisis)
   - [SSD 3 — Ejecución de análisis en tiempo real](#ssd-3--ejecución-de-análisis-en-tiempo-real)
   - [SSD 4 — Visualización web en tiempo real](#ssd-4--visualización-web-en-tiempo-real)
@@ -39,7 +39,7 @@ ABML integra tres subsistemas que trabajan en conjunto para detectar y registrar
 ┌─────────────────────────────────────────────────────────────┐
 │                        ABML System                          │
 │                                                             │
-│  ┌──────────────┐   HTTP/JWT    ┌─────────────────────┐    │
+│  ┌──────────────┐   HTTP/REST   ┌─────────────────────┐    │
 │  │  Desktop App │◄─────────────►│   API REST (.NET 9) │    │
 │  │  (Python)    │               │                     │    │
 │  └──────────────┘               │   ┌─────────────┐   │    │
@@ -67,10 +67,12 @@ El backend sigue **Arquitectura Limpia** con principios **SOLID**:
 ```
 Controllers  →  Services (interfaces)  →  Repositories (multi-DB)  →  Database
      ↕                  ↕
-  JWT Auth           SignalR Hub
+  HTTP REST          SignalR Hub
 ```
 
 **Patrón multi-base de datos:** el sistema detecta y conmuta automáticamente entre SQL Server, PostgreSQL y MySQL/MariaDB sin cambios en la lógica de negocio.
+
+> **Autenticación JWT (versión futura):** la API incluye el módulo `AutenticacionController` con generación de tokens JWT y encriptación BCrypt completamente implementados, pero no se encuentran activos en esta versión ya que el sistema no requiere registro ni inicio de sesión. Esta base queda disponible para cuando el proyecto incorpore control de acceso por roles.
 
 ---
 
@@ -78,28 +80,28 @@ Controllers  →  Services (interfaces)  →  Repositories (multi-DB)  →  Data
 
 Los SSD describen las interacciones entre los actores externos y el sistema como una caja negra, mostrando los eventos del sistema que se disparan.
 
-### SSD 1 — Autenticación de usuario
+### SSD 1 — Inicio y conexión al sistema
 
 **Actor:** Evaluador (usuario de la aplicación de escritorio)
 
 ```
 Evaluador          Desktop App          API REST          Base de datos
     │                   │                   │                   │
-    │── ingresarCredenciales() ────────────►│                   │
-    │                   │                   │── validarUsuario()►│
-    │                   │                   │◄── usuario ────────│
-    │                   │◄── JWT Token ──────│                   │
-    │◄── acceso concedido ──│               │                   │
+    │── abrir app() ────►│                   │                   │
+    │                   │── GET /api/diagnostico/salud ─────────►│
+    │                   │◄── { estado: "ok" } ──────────────────│
+    │◄── sistema listo ──│                   │                   │
     │                   │                   │                   │
-    │    [Token expira] │                   │                   │
-    │── renovarSesión() ────────────────────►│                   │
-    │                   │◄── nuevo JWT ──────│                   │
+    │── navegar setup() ─►│                  │                   │
+    │                   │── GET /api/{grupos} ──────────────────►│
+    │                   │◄── lista de grupos ────────────────────│
+    │◄── mostrar grupos ──│                  │                   │
 ```
 
 **Operaciones del sistema:**
 
-- `iniciarSesion(usuario, contraseña)` → valida credenciales con BCrypt y retorna JWT
-- `renovarToken(jwt)` → emite nuevo token si el actual es válido
+- `verificarConectividad()` → consulta el endpoint de diagnóstico para confirmar que la API está disponible
+- `obtenerGruposPreguntas()` → retorna los grupos de preguntas disponibles en la base de datos
 
 ---
 
@@ -218,7 +220,7 @@ Núcleo del sistema. Expone endpoints REST genéricos y un hub de comunicación 
 
 | Controlador                  | Ruta base               | Función                             |
 | ---------------------------- | ----------------------- | ------------------------------------ |
-| `AutenticacionController`  | `/api/autenticacion`  | Login y emisión de JWT              |
+| `AutenticacionController`  | `/api/autenticacion`  | Login y emisión de JWT — implementado, reservado para versiones futuras |
 | `EntidadesController`      | `/api/entidades`      | CRUD genérico sobre cualquier tabla |
 | `ConsultasController`      | `/api/consultas`      | Consultas SQL parametrizadas         |
 | `ProcedimientosController` | `/api/procedimientos` | Ejecución de stored procedures      |
@@ -251,7 +253,7 @@ Interfaz principal del evaluador. Gestiona la captura, el análisis y el control
 
 ---
 
-### Sitio web — `WebSite-ABMLL`
+### Sitio web — `WebSite-ABML`
 
 Pantalla que ve el evaluado durante la sesión. Se actualiza automáticamente mediante WebSocket.
 
@@ -267,7 +269,7 @@ Pantalla que ve el evaluado durante la sesión. Se actualiza automáticamente me
 ## Stack tecnológico
 
 ```
-Backend          C# / ASP.NET Core 9.0 · Dapper · SignalR · JWT · BCrypt
+Backend          C# / ASP.NET Core 9.0 · Dapper · SignalR · BCrypt
 Bases de datos   SQL Server · PostgreSQL · MySQL · MariaDB
 Frontend web     React 19 · Vite 8 · @microsoft/signalr
 Desktop          Python 3 · CustomTkinter · OpenCV · mss · pywin32 · Pillow
@@ -295,7 +297,7 @@ cd APICSHARP-ABML
 
 # Copiar y editar configuración
 cp appsettings.example.json appsettings.json
-# Editar: cadena de conexión, clave JWT, proveedor de BD
+# Editar: cadena de conexión y proveedor de BD
 
 dotnet restore
 dotnet run
@@ -304,7 +306,7 @@ dotnet run
 ### 2. Sitio web
 
 ```bash
-cd WebSite-ABMLL
+cd WebSite-ABML
 
 npm install
 
@@ -342,7 +344,7 @@ Proyecto_Grado_USB/
 │   ├── ui/
 │   │   └── pages/
 │   └── assets/
-└── WebSite-ABMLL/           # Frontend React
+└── WebSite-ABML/           # Frontend React
     └── src/
         ├── components/
         └── hooks/
@@ -364,5 +366,5 @@ Proyecto_Grado_USB/
 
 Proyecto de grado desarrollado por:
 
-- **Jeferson** — API REST, Módulo web (WebSite-ABMLL)
+- **Jeferson** — API REST, Módulo web (WebSite-ABML)
 - **Lucas** — Arquitectura backend, Aplicación de escritorio (Desktop-ABML)

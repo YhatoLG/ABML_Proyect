@@ -2,7 +2,7 @@
 
 ![.NET Version](https://img.shields.io/badge/.NET-9.0-blue?logo=dotnet)
 ![Database](https://img.shields.io/badge/DB-SQL_Server_%7C_Postgres_%7C_MySQL-brightgreen?logo=databricks)
-![Auth](https://img.shields.io/badge/Auth-JWT_&_BCrypt-gold?logo=jsonwebtokens)
+![Auth](https://img.shields.io/badge/Auth-JWT_%26_BCrypt_(futuro)-lightgrey?logo=jsonwebtokens)
 ![Architecture](https://img.shields.io/badge/Architecture-Clean_%26_SOLID-orange)
 ![License](https://img.shields.io/badge/License-Educativo-lightgrey)
 
@@ -32,8 +32,8 @@ API REST generica para operaciones CRUD sobre cualquier tabla de base de datos. 
 
 - **CRUD Generico**: Operaciones Create, Read, Update, Delete sobre cualquier tabla
 - **Multi-Base de Datos**: SQL Server, PostgreSQL, MySQL, MariaDB
-- **Autenticacion JWT**: Tokens seguros con expiracion configurable
-- **Swagger UI**: Documentacion interactiva de la API
+- **Autenticacion JWT**: Implementada y disponible, pero no activa en la version actual del proyecto. Reservada para futuras versiones que requieran control de acceso
+- **Swagger UI**: Documentacion interactiva de la API (solo en entorno de desarrollo)
 - **Consultas Parametrizadas**: Ejecucion segura de SQL con parametros
 - **Stored Procedures**: Ejecucion dinamica de procedimientos almacenados
 - **Introspeccion de BD**: Consultar estructura de tablas y base de datos
@@ -177,20 +177,20 @@ Solo modifica el valor de `DatabaseProvider`:
 
 | Metodo | Ruta | Descripcion | Auth |
 |--------|------|-------------|------|
-| GET | `/api/{tabla}` | Obtener todos los registros | Si |
-| GET | `/api/{tabla}/{clave}/{valor}` | Obtener por clave | Si |
-| POST | `/api/{tabla}` | Crear registro | Si |
-| PUT | `/api/{tabla}/{clave}/{valor}` | Actualizar registro | Si |
-| DELETE | `/api/{tabla}/{clave}/{valor}` | Eliminar registro | Si |
-| POST | `/api/{tabla}/verificar-contrasena` | Verificar contrasena BCrypt | Si |
+| GET | `/api/{tabla}` | Obtener todos los registros | No |
+| GET | `/api/{tabla}/{clave}/{valor}` | Obtener por clave | No |
+| POST | `/api/{tabla}` | Crear registro | No |
+| PUT | `/api/{tabla}/{clave}/{valor}` | Actualizar registro | No |
+| DELETE | `/api/{tabla}/{clave}/{valor}` | Eliminar registro | No |
+| POST | `/api/{tabla}/verificar-contrasena` | Verificar contrasena BCrypt | No |
 | GET | `/api/info` | Informacion del controller | No |
 
 ### ConsultasController - SQL Parametrizado
 
 | Metodo | Ruta | Descripcion | Auth |
 |--------|------|-------------|------|
-| POST | `/api/consultas/ejecutar` | Ejecutar consulta SQL | Si |
-| POST | `/api/consultas/validar` | Validar consulta SQL | Si |
+| POST | `/api/consultas/ejecutar` | Ejecutar consulta SQL | No |
+| POST | `/api/consultas/validar` | Validar consulta SQL | No |
 
 ### AutenticacionController - JWT
 
@@ -216,16 +216,20 @@ Solo modifica el valor de `DatabaseProvider`:
 
 | Metodo | Ruta | Descripcion | Auth |
 |--------|------|-------------|------|
-| POST | `/api/procedimientos/ejecutarsp` | Ejecutar procedimiento almacenado | Si |
+| POST | `/api/procedimientos/ejecutarsp` | Ejecutar procedimiento almacenado | No |
 
 ---
 
 ## Autenticacion JWT
 
-### 1. Obtener token
+> **Estado actual**: El modulo JWT esta implementado y funcional, pero **no se encuentra activo** en esta version del proyecto. Los endpoints son de acceso publico ya que el flujo del sistema no requiere registro ni inicio de sesion. Esta funcionalidad queda disponible como base para futuras versiones que requieran control de acceso.
+
+### Como funciona (para futuras versiones)
+
+El endpoint de autenticacion genera un token JWT firmado a partir de credenciales almacenadas en cualquier tabla de la base de datos con contrasenas encriptadas en BCrypt.
 
 ```http
-POST /api/autenticacion/login
+POST /api/autenticacion/token
 Content-Type: application/json
 
 {
@@ -237,22 +241,19 @@ Content-Type: application/json
 }
 ```
 
-### 2. Respuesta exitosa
+### Respuesta exitosa
 
 ```json
 {
+  "estado": 200,
+  "mensaje": "Autenticacion exitosa.",
+  "usuario": "admin@ejemplo.com",
   "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
-  "expira": "2024-01-15T12:00:00Z",
-  "usuario": "admin@ejemplo.com"
+  "expiracion": "2024-01-15T12:00:00Z"
 }
 ```
 
-### 3. Usar token en peticiones
-
-```http
-GET /api/productos
-Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
-```
+Para activar la proteccion de endpoints en una version futura, se debe agregar `[Authorize]` a los controladores y descomentar las configuraciones correspondientes.
 
 ---
 
@@ -262,21 +263,18 @@ Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
 
 ```http
 GET /api/productos?limite=100
-Authorization: Bearer {token}
 ```
 
 ### Obtener producto por ID
 
 ```http
 GET /api/productos/id/42
-Authorization: Bearer {token}
 ```
 
 ### Crear un producto
 
 ```http
 POST /api/productos
-Authorization: Bearer {token}
 Content-Type: application/json
 
 {
@@ -290,7 +288,6 @@ Content-Type: application/json
 
 ```http
 PUT /api/productos/id/42
-Authorization: Bearer {token}
 Content-Type: application/json
 
 {
@@ -303,14 +300,12 @@ Content-Type: application/json
 
 ```http
 DELETE /api/productos/id/42
-Authorization: Bearer {token}
 ```
 
 ### Ejecutar consulta SQL
 
 ```http
 POST /api/consultas/ejecutar
-Authorization: Bearer {token}
 Content-Type: application/json
 
 {
@@ -325,7 +320,6 @@ Content-Type: application/json
 
 ```http
 POST /api/procedimientos/ejecutarsp
-Authorization: Bearer {token}
 Content-Type: application/json
 
 {
@@ -444,8 +438,7 @@ ApiGenericaCsharp/
 2. Abrir Swagger: `http://localhost:5000/swagger`
 3. Abrir ReDoc: `http://localhost:5000/redoc`
 4. Probar endpoint de diagnostico: `GET /api/diagnostico/conexion`
-5. Hacer login para obtener token: `POST /api/autenticacion/token`
-6. Usar token en endpoints protegidos (boton "Authorize" en Swagger)
+5. Probar cualquier endpoint CRUD directamente sin autenticacion
 
 ---
 
@@ -462,16 +455,7 @@ A continuacion, se listan los errores mas frecuentes y como solucionarlos:
 - Si usas SQL Server, asegurate de que el nombre del servidor sea correcto (ej. `localhost` o `(localdb)\MSSQLLocalDB`)
 - Revisa que el `DatabaseProvider` en `appsettings.json` coincida exactamente con una de las llaves de `ConnectionStrings`
 
-### 2. El Token JWT no funciona (401 Unauthorized)
-
-**Sintoma**: Recibes un error 401 incluso despues de pegar el token.
-
-**Solucion**:
-- Asegurate de incluir la palabra `Bearer` seguida de un espacio antes del token: `Bearer eyJhbGci...`
-- Verifica que la `Jwt:Key` en tu configuracion tenga al menos 32 caracteres (256 bits)
-- Comprueba que el token no haya expirado
-
-### 3. Error con el Puerto (Puerto en uso)
+### 2. Error con el Puerto (Puerto en uso)
 
 **Sintoma**: `Failed to bind to address http://localhost:5000`
 
@@ -480,7 +464,7 @@ A continuacion, se listan los errores mas frecuentes y como solucionarlos:
 - O cierra la aplicacion que este usando ese puerto
 - Puedes buscar el proceso con: `netstat -ano | findstr :5000`
 
-### 4. Errores de Certificado SSL
+### 3. Errores de Certificado SSL
 
 **Sintoma**: El navegador o Swagger muestran un error de "Conexion no privada".
 
@@ -490,7 +474,7 @@ A continuacion, se listan los errores mas frecuentes y como solucionarlos:
 dotnet dev-certs https --trust
 ```
 
-### 5. Error CS0234: El tipo o nombre no existe
+### 4. Error CS0234: El tipo o nombre no existe
 
 **Sintoma**: Errores de compilacion relacionados con namespaces o paquetes.
 
