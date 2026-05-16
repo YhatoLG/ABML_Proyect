@@ -273,20 +273,22 @@ if (app.Environment.IsDevelopment())
     app.UseDeveloperExceptionPage();
 }
 
-// Habilita Swagger y expone la UI en la ruta /swagger.
-app.UseSwagger();
-app.UseSwaggerUI(c =>
+// Habilita Swagger y ReDoc solo en entorno de desarrollo.
+if (app.Environment.IsDevelopment())
 {
-    c.SwaggerEndpoint("/swagger/v1/swagger.json", "ApiGenericaCsharp v1");
-    c.RoutePrefix = "swagger";
-});
+    app.UseSwagger();
+    app.UseSwaggerUI(c =>
+    {
+        c.SwaggerEndpoint("/swagger/v1/swagger.json", "ApiGenericaCsharp v1");
+        c.RoutePrefix = "swagger";
+    });
 
-// Habilita ReDoc en la ruta /redoc (documentación alternativa de solo lectura).
-app.UseReDoc(c =>
-{
-    c.RoutePrefix = "redoc";
-    c.SpecUrl("/swagger/v1/swagger.json");
-});
+    app.UseReDoc(c =>
+    {
+        c.RoutePrefix = "redoc";
+        c.SpecUrl("/swagger/v1/swagger.json");
+    });
+}
 
 // Sirve archivos estáticos desde wwwroot/ (index.html, CSS, JS, etc.)
 app.UseStaticFiles();
