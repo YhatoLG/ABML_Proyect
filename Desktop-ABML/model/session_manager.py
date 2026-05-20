@@ -45,12 +45,15 @@ def load_sessions() -> list:
 
 
 def load_group_reports() -> list:
-    """Carga los reportes de grupo desde la base de datos via API."""
+    """
+    Carga solo los metadatos de los reportes de grupo (sin 'registros').
+    Los registros son potencialmente grandes; se obtienen bajo demanda con fetch_group_records().
+    """
     try:
         r = API_SESSION.post(
             _CONSULTA_URL,
             json={
-                "consulta":   "SELECT id, nombre_grupo, fecha, hora, personas, registros "
+                "consulta":   "SELECT id, nombre_grupo, fecha, hora, personas "
                               "FROM reportes_grupo ORDER BY fecha DESC, hora DESC",
                 "parametros": {},
             },
@@ -67,10 +70,6 @@ def load_group_reports() -> list:
                 persons = _json.loads(row.get("personas") or "[]")
             except Exception:
                 persons = []
-            try:
-                records = _json.loads(row.get("registros") or "[]")
-            except Exception:
-                records = []
 
             reports.append({
                 "id":         str(row.get("id", "")),
@@ -78,9 +77,31 @@ def load_group_reports() -> list:
                 "date":       str(row.get("fecha", ""))[:10],
                 "time":       str(row.get("hora", "")),
                 "persons":    persons,
-                "records":    records,
+                "records":    [],   # se cargan bajo demanda
             })
         return reports
+    except Exception:
+        return []
+
+
+def fetch_group_records(report_id: str) -> list:
+    """Descarga los registros detallados de un reporte de grupo específico."""
+    try:
+        r = API_SESSION.post(
+            _CONSULTA_URL,
+            json={
+                "consulta":   "SELECT registros FROM reportes_grupo WHERE id = @rid LIMIT 1",
+                "parametros": {"rid": report_id},
+            },
+            timeout=15,
+        )
+        if r.status_code != 200:
+            return []
+        data  = r.json()
+        rows  = data.get("resultados") or data.get("Resultados") or []
+        if not rows:
+            return []
+        return _json.loads(rows[0].get("registros") or "[]")
     except Exception:
         return []
 

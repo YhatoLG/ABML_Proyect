@@ -13,7 +13,10 @@ from PIL import Image
 import ui.theme as T
 from ui.assets import FLECHA_IZQ_FILE, USUARIO_FILE, REPORTE_FILE, DESCARGA_FILE, ELIMINAR_FILE
 from ui.tooltip import Tooltip
-from model.session_manager import load_sessions, delete_session, load_group_reports, delete_group_report
+from model.session_manager import (
+    load_sessions, delete_session,
+    load_group_reports, delete_group_report, fetch_group_records,
+)
 from model.config import API_BASE_URL, API_SESSION
 
 
@@ -152,7 +155,7 @@ class HistoryPage(ctk.CTkFrame):
                      text_color=T.TEXT_DIM, font=T.font(11)).pack(side="left", padx=(0, 10))
         ctk.CTkLabel(detail, text=f"🕐 {report.get('time', '')}",
                      text_color=T.TEXT_DIM, font=T.font(11)).pack(side="left", padx=(0, 10))
-        ctk.CTkLabel(detail, text=f"📋 {len(report.get('records', []))} registros",
+        ctk.CTkLabel(detail, text=f"👥 {len(report.get('persons', []))} personas",
                      text_color=T.TEXT_DIM, font=T.font(11)).pack(side="left")
 
         # Botones
@@ -166,10 +169,10 @@ class HistoryPage(ctk.CTkFrame):
             fg_color=T.BG_GREEN_DARK, hover_color=T.BG_GREEN_HOVER,
             corner_radius=T.CORNER_RADIUS_BTN,
             anchor="center",
-            command=lambda r=report: self._export_group_excel(r),
+            command=lambda r=report: self._download_group_pdf(r),
         )
         btn_excel.pack(side="left", padx=(0, 6))
-        Tooltip(btn_excel, "Descargar reporte Excel del grupo")
+        Tooltip(btn_excel, "Descargar reporte PDF del ACU grupal")
 
         btn_zip = ctk.CTkButton(
             btns_frame,
@@ -240,10 +243,10 @@ class HistoryPage(ctk.CTkFrame):
             fg_color=T.BG_GREEN_DARK, hover_color=T.BG_GREEN_HOVER,
             corner_radius=T.CORNER_RADIUS_BTN,
             anchor="center",
-            command=lambda s=session: self._export_excel(s),
+            command=lambda s=session: self._download_individual_pdf(s),
         )
         btn_excel.pack(side="left", padx=(0, 6))
-        Tooltip(btn_excel, "Descargar reporte Excel")
+        Tooltip(btn_excel, "Descargar reporte PDF del ACU")
 
         btn_zip = ctk.CTkButton(
             btns_frame,
@@ -319,6 +322,47 @@ class HistoryPage(ctk.CTkFrame):
         except Exception:
             pass
         return []
+
+    # ── Exportación Excel individual ──────────────────────────────────────────
+
+    # ── Descarga PDF individual ACU ───────────────────────────────────────────
+
+    def _download_individual_pdf(self, session: dict):
+        persona      = session.get("name", "sesion")
+        name_safe    = persona.replace(" ", "_")
+        default_name = f"reporte_ACU_{name_safe}_{session.get('date', '')}.pdf"
+
+        save_path = fd.asksaveasfilename(
+            defaultextension=".pdf",
+            filetypes=[("PDF", "*.pdf")],
+            initialfile=default_name,
+            title="Guardar reporte PDF del ACU individual",
+        )
+        if not save_path:
+            return
+
+        try:
+            from model.acu_engine import fetch_acu_for_persona
+            from model.acu_pdf   import generar_pdf_estudiante
+
+            est_data = fetch_acu_for_persona(persona)
+            if not est_data:
+                mb.showerror("Sin datos ACU",
+                             f"No hay reporte ACU disponible para {persona}.\n"
+                             "El ACU solo se calcula en sesiones grupales.")
+                return
+
+            pdf_bytes = generar_pdf_estudiante(
+                est_data,
+                nombre_grupo = str(est_data.get("nombre_grupo", "")),
+                fecha_sesion = str(est_data.get("fecha", ""))[:10],
+            )
+            with open(save_path, "wb") as f:
+                f.write(pdf_bytes)
+
+            mb.showinfo("PDF generado", f"Reporte PDF guardado en:\n{save_path}")
+        except Exception as exc:
+            mb.showerror("Error", f"No se pudo generar el PDF:\n{exc}")
 
     # ── Exportación Excel individual ──────────────────────────────────────────
 
@@ -404,8 +448,7 @@ class HistoryPage(ctk.CTkFrame):
     # ── Descarga ZIP de grupo ─────────────────────────────────────────────────
 
     def _download_group(self, report: dict):
-        records    = report.get("records", [])
-        group_safe = report.get("group_name", "grupo").replace(" ", "_")
+        group_safe   = report.get("group_name", "grupo").replace(" ", "_")
         default_name = f"grupo_{group_safe}_{report.get('date', '')}.zip"
 
         save_path = fd.asksaveasfilename(
@@ -418,6 +461,12 @@ class HistoryPage(ctk.CTkFrame):
             return
 
         try:
+            # Cargar registros bajo demanda (no se traen al abrir el historial)
+            records = fetch_group_records(report.get("id", ""))
+            if not records:
+                mb.showerror("Error", "No se encontraron registros para este reporte de grupo.")
+                return
+
             csv_buffer = io.StringIO()
             writer = csv.writer(csv_buffer)
             writer.writerow(["persona", "pregunta", "respuesta_correcta",
@@ -435,19 +484,155 @@ class HistoryPage(ctk.CTkFrame):
                     rec.get("timestamp", ""),
                 ])
 
+            pdf_incluido = False
+            pdf_error    = ""
             with zipfile.ZipFile(save_path, "w", zipfile.ZIP_DEFLATED) as zf:
                 zf.writestr("registros_grupo.csv", csv_buffer.getvalue())
 
-            mb.showinfo("Descarga completa", f"Reporte del grupo guardado en:\n{save_path}")
+                # Calcular ACU directo desde los registros ya descargados — sin depender
+                # de IDs en la BD. Los registros están en memoria, así que siempre funciona.
+                try:
+                    from model.acu_engine import compute_acu
+                    from model.acu_pdf   import generar_pdf_grupo
+
+                    result = compute_acu(records)
+                    if result:
+                        mi  = result["model_info"]
+                        adf = result["acu_df"]
+
+                        sesion_dict = {
+                            "nombre_grupo":      report.get("group_name", "Grupo"),
+                            "fecha":             report.get("date",       ""),
+                            "hora":              report.get("time",       ""),
+                            "acu_promedio":      float(adf["ACU_%"].mean()),
+                            "total_estudiantes": int(len(adf)),
+                            "coef_b0":           mi["b0"],
+                            "coef_b1":           mi["b1"],
+                            "coef_b2":           mi["b2"],
+                            "coef_b3":           mi["b3"],
+                            "precision_modelo":  mi["precision"],
+                            "umbral_grupal":     mi["umbral"],
+                        }
+
+                        est_list = []
+                        for _, row in adf.iterrows():
+                            est_list.append({
+                                "persona":              str(row["persona"]),
+                                "preguntas":            int(row["preguntas"]),
+                                "correctas":            int(row["correctas"]),
+                                "incorrectas":          int(row["incorrectas"]),
+                                "tasa_acierto":         float(row["tasa_acierto"]),
+                                "tasa_acierto_pct":     float(row["tasa_acierto_%"]),
+                                "emocion_predominante": str(row["emocion_predominante"]),
+                                "confianza_media":      float(row["confianza_media"]),
+                                "acu":                  float(row["ACU"]),
+                                "acu_pct":              float(row["ACU_%"]),
+                                "ranking":              int(row["ranking"]),
+                                "total_alumnos":        int(row["total_alumnos"]),
+                                "acu_grupo":            float(row["acu_grupo"]),
+                            })
+
+                        pdf_bytes  = generar_pdf_grupo(sesion_dict, est_list)
+                        nombre_pdf = f"reporte_ACU_{group_safe}_{report.get('date', '')}.pdf"
+                        zf.writestr(nombre_pdf, pdf_bytes)
+                        pdf_incluido = True
+                    else:
+                        pdf_error = "El grupo necesita al menos 2 estudiantes para calcular el ACU."
+                except Exception as e:
+                    pdf_error = str(e)
+
+            if pdf_incluido:
+                mb.showinfo("Descarga completa",
+                            f"ZIP guardado en:\n{save_path}\n\n✓ Incluye reporte PDF del ACU grupal.")
+            else:
+                msg = f"ZIP guardado en:\n{save_path}\n\n⚠ El PDF de ACU no se pudo generar."
+                if pdf_error:
+                    msg += f"\nDetalle: {pdf_error}"
+                mb.showinfo("Descarga completa", msg)
         except Exception as exc:
             mb.showerror("Error", f"No se pudo crear el ZIP:\n{exc}")
 
     # ── Exportación Excel de grupo ────────────────────────────────────────────
 
+    # ── Descarga PDF grupal ACU ───────────────────────────────────────────────
+
+    def _download_group_pdf(self, report: dict):
+        group_safe   = report.get("group_name", "grupo").replace(" ", "_")
+        default_name = f"reporte_ACU_{group_safe}_{report.get('date', '')}.pdf"
+
+        save_path = fd.asksaveasfilename(
+            defaultextension=".pdf",
+            filetypes=[("PDF", "*.pdf")],
+            initialfile=default_name,
+            title="Guardar reporte PDF del ACU grupal",
+        )
+        if not save_path:
+            return
+
+        try:
+            records = fetch_group_records(report.get("id", ""))
+            if not records:
+                mb.showerror("Error", "No se encontraron registros para este reporte de grupo.")
+                return
+
+            from model.acu_engine import compute_acu
+            from model.acu_pdf   import generar_pdf_grupo
+
+            result = compute_acu(records)
+            if not result:
+                mb.showerror("Error",
+                             "El grupo necesita al menos 2 estudiantes para calcular el ACU.")
+                return
+
+            mi  = result["model_info"]
+            adf = result["acu_df"]
+
+            sesion_dict = {
+                "nombre_grupo":      report.get("group_name", "Grupo"),
+                "fecha":             report.get("date",       ""),
+                "hora":              report.get("time",       ""),
+                "acu_promedio":      float(adf["ACU_%"].mean()),
+                "total_estudiantes": int(len(adf)),
+                "coef_b0":           mi["b0"],
+                "coef_b1":           mi["b1"],
+                "coef_b2":           mi["b2"],
+                "coef_b3":           mi["b3"],
+                "precision_modelo":  mi["precision"],
+                "umbral_grupal":     mi["umbral"],
+            }
+
+            est_list = []
+            for _, row in adf.iterrows():
+                est_list.append({
+                    "persona":              str(row["persona"]),
+                    "preguntas":            int(row["preguntas"]),
+                    "correctas":            int(row["correctas"]),
+                    "incorrectas":          int(row["incorrectas"]),
+                    "tasa_acierto":         float(row["tasa_acierto"]),
+                    "tasa_acierto_pct":     float(row["tasa_acierto_%"]),
+                    "emocion_predominante": str(row["emocion_predominante"]),
+                    "confianza_media":      float(row["confianza_media"]),
+                    "acu":                  float(row["ACU"]),
+                    "acu_pct":              float(row["ACU_%"]),
+                    "ranking":              int(row["ranking"]),
+                    "total_alumnos":        int(row["total_alumnos"]),
+                    "acu_grupo":            float(row["acu_grupo"]),
+                })
+
+            pdf_bytes = generar_pdf_grupo(sesion_dict, est_list)
+            with open(save_path, "wb") as f:
+                f.write(pdf_bytes)
+
+            mb.showinfo("PDF generado", f"Reporte PDF guardado en:\n{save_path}")
+        except Exception as exc:
+            mb.showerror("Error", f"No se pudo generar el PDF:\n{exc}")
+
+    # ── Exportación Excel de grupo ────────────────────────────────────────────
+
     def _export_group_excel(self, report: dict):
-        records = report.get("records", [])
+        records = fetch_group_records(report.get("id", ""))
         if not records:
-            mb.showerror("Error", "No hay registros en este reporte de grupo.")
+            mb.showerror("Error", "No se encontraron registros para este reporte de grupo.")
             return
 
         group_safe   = report.get("group_name", "grupo").replace(" ", "_")
@@ -552,7 +737,8 @@ class HistoryPage(ctk.CTkFrame):
     def _download(self, session: dict):
         sid          = session.get("id", "")
         session_dir  = session.get("dir", "")
-        name_safe    = session.get("name", "sesion").replace(" ", "_")
+        persona      = session.get("name", "sesion")
+        name_safe    = persona.replace(" ", "_")
         default_name = f"reporte_{name_safe}_{session.get('date', '')}.zip"
 
         save_path = fd.asksaveasfilename(
@@ -590,6 +776,21 @@ class HistoryPage(ctk.CTkFrame):
                     for fname in os.listdir(images_dir):
                         fpath = os.path.join(images_dir, fname)
                         zf.write(fpath, f"{sid}/images/{fname}")
+
+                # Incluir PDF individual ACU si este estudiante tiene resultados en la BD
+                try:
+                    from model.acu_engine import fetch_acu_for_persona
+                    from model.acu_pdf import generar_pdf_estudiante
+                    est_data = fetch_acu_for_persona(persona)
+                    if est_data:
+                        pdf_bytes = generar_pdf_estudiante(
+                            est_data,
+                            nombre_grupo = str(est_data.get("nombre_grupo", "")),
+                            fecha_sesion = str(est_data.get("fecha", ""))[:10],
+                        )
+                        zf.writestr(f"{sid}/reporte_ACU_{name_safe}.pdf", pdf_bytes)
+                except Exception:
+                    pass  # Si no hay ACU o falla el PDF, el CSV sigue estando
 
             mb.showinfo("Descarga completa", f"Reporte guardado en:\n{save_path}")
         except Exception as exc:
