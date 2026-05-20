@@ -5,6 +5,7 @@ import os
 import csv
 import zipfile
 import io
+import threading
 import tkinter.filedialog as fd
 import tkinter.messagebox as mb
 import customtkinter as ctk
@@ -56,7 +57,7 @@ class HistoryPage(ctk.CTkFrame):
     # ── Construcción ─────────────────────────────────────────────────────────
 
     def _build(self):
-        # Header
+        # Header — renderiza inmediatamente sin esperar datos de red
         header = ctk.CTkFrame(self, fg_color="transparent")
         header.pack(fill="x", padx=20, pady=(16, 8))
 
@@ -77,33 +78,59 @@ class HistoryPage(ctk.CTkFrame):
         ctk.CTkLabel(title_f, text="HISTORIAL",   text_color=T.GREEN_PRIMARY, font=T.bold(24)).pack(side="left")
         ctk.CTkLabel(title_f, text=" / ANÁLISIS", text_color=T.WHITE,         font=T.bold(24)).pack(side="left")
 
-        sessions      = load_sessions()
-        group_reports = load_group_reports()
+        self._scroll = ctk.CTkScrollableFrame(self, fg_color="transparent")
+        self._scroll.pack(fill="both", expand=True, padx=40, pady=(0, 6))
 
-        scroll = ctk.CTkScrollableFrame(self, fg_color="transparent")
-        scroll.pack(fill="both", expand=True, padx=40, pady=(0, 6))
+        # Indicador de carga visible mientras se consulta la API
+        self._loading_lbl = ctk.CTkLabel(
+            self._scroll,
+            text="⏳  Cargando historial...",
+            text_color=T.TEXT_MID, font=T.font(14),
+        )
+        self._loading_lbl.pack(pady=40)
+
+        # Footer — se actualiza cuando llegan los datos
+        self._footer_lbl = ctk.CTkLabel(
+            self,
+            text="Cargando...",
+            text_color=T.GREEN_PRIMARY, font=T.font(12),
+        )
+        self._footer_lbl.pack(pady=(0, 14))
+
+        # Cargar sesiones y reportes en background para no bloquear la UI
+        def _load():
+            sessions      = load_sessions()
+            group_reports = load_group_reports()
+            self.after(0, lambda: self._populate(sessions, group_reports))
+
+        threading.Thread(target=_load, daemon=True).start()
+
+    def _populate(self, sessions: list, group_reports: list):
+        """Puebla el scroll con los datos ya cargados. Corre en el hilo principal."""
+        try:
+            self._loading_lbl.destroy()
+        except Exception:
+            pass
 
         # ── Sección grupos ────────────────────────────────────────────────────
         if group_reports:
-            self._section_label(scroll, "Grupos evaluados")
+            self._section_label(self._scroll, "Grupos evaluados")
             for i, gr in enumerate(group_reports):
-                self._group_card(scroll, i + 1, gr)
+                self._group_card(self._scroll, i + 1, gr)
 
         # ── Sección individuales ──────────────────────────────────────────────
         if sessions:
-            self._section_label(scroll, "Análisis individuales")
-            for i, s in enumerate(reversed(sessions)):
-                self._session_card(scroll, i + 1, s)
+            self._section_label(self._scroll, "Análisis individuales")
+            for i, s in enumerate(sessions):
+                self._session_card(self._scroll, i + 1, s)
 
         if not sessions and not group_reports:
-            ctk.CTkLabel(scroll, text="No hay análisis registrados aún.",
+            ctk.CTkLabel(self._scroll, text="No hay análisis registrados aún.",
                          text_color=T.TEXT_DARKER, font=T.font(14)).pack(pady=40)
 
-        ctk.CTkLabel(
-            self,
-            text=f"Grupos: {len(group_reports)}   ·   Sesiones individuales: {len(sessions)}",
-            text_color=T.GREEN_PRIMARY, font=T.font(12),
-        ).pack(pady=(0, 14))
+        self._footer_lbl.configure(
+            text=f"Grupos: {len(group_reports)}   ·   Sesiones individuales: {len(sessions)}"
+        )
 
     def _section_label(self, parent, text: str):
         row = ctk.CTkFrame(parent, fg_color="transparent")

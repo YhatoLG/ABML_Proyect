@@ -51,6 +51,8 @@ class AnalysisPage(ctk.CTkFrame):
         self._group_report_saved  : bool = False
         # Evita doble respuesta si el usuario presiona/clica rápido
         self._answering           : bool = False
+        # Rastrea qué persona se está preparando para cancelar cargas obsoletas
+        self._pending_person      : str  = session.get("name", "")
 
         # Estado de navegación de preguntas
         self.current_q_idx = 0
@@ -405,6 +407,7 @@ class AnalysisPage(ctk.CTkFrame):
             return
         self._q_group_name = value
         self._update_person_selector()
+        self._transitioning = True
         self._load_new_person(self.session["name"])
 
     def _on_sel_person_change(self, value: str):
@@ -417,6 +420,7 @@ class AnalysisPage(ctk.CTkFrame):
             return
         if value in self._person_group:
             self._current_person_idx = self._person_group.index(value)
+        self._transitioning = True
         self._load_new_person(value)
 
     def _update_person_selector(self):
@@ -545,6 +549,14 @@ class AnalysisPage(ctk.CTkFrame):
             return
         self._answering = True
 
+        # Capturar todo el estado volátil en el hilo principal ANTES de lanzar hilos.
+        # self.session, self.emotion y self.emotion_prob pueden cambiar si el usuario
+        # cambia de persona mientras el hilo POST está en cola.
+        session_id   = self.session["id"]
+        session_name = self.session["name"]
+        cur_emotion  = self.emotion
+        cur_prob     = round(self.emotion_prob, 2)
+
         timestamp  = datetime.datetime.now().isoformat()
         image_name = timestamp.replace(":", "-") + ".png"
         images_dir = os.path.join(self.session["dir"], "images")
@@ -563,24 +575,28 @@ class AnalysisPage(ctk.CTkFrame):
 
         # Acumular en el reporte del grupo
         self._group_records.append({
-            "persona":            self.session["name"],
+            "persona":            session_name,
             "pregunta":           question_text,
             "respuesta_correcta": correct_answer,
-            "emocion":            self.emotion,
-            "prob_emocion":       round(self.emotion_prob, 2),
+            "emocion":            cur_emotion,
+            "prob_emocion":       cur_prob,
             "respondio":          response == 1,
             "timestamp":          timestamp,
         })
 
         def _post_registro():
+            # Verificar que la sesión no cambió mientras el hilo esperaba en cola.
+            # Si cambió, este registro pertenece a una sesión que ya no está activa.
+            if self.session.get("id") != session_id:
+                return
             try:
                 API_SESSION.post(f"{API_BASE_URL}/api/registros", json={
-                    "sesion_id":          self.session["id"],
+                    "sesion_id":          session_id,
                     "timestamp":          timestamp,
                     "pregunta":           question_text,
                     "respuesta_correcta": correct_answer,
-                    "emocion":            self.emotion,
-                    "prob_emocion":       round(self.emotion_prob, 2),
+                    "emocion":            cur_emotion,
+                    "prob_emocion":       cur_prob,
                     "respondio":          response == 1,
                     "imagen_path":        image_path,
                 }, timeout=5)
@@ -708,8 +724,13 @@ class AnalysisPage(ctk.CTkFrame):
         threading.Thread(target=_save, daemon=True).start()
 
     def _load_new_person(self, person_name: str):
-        """Finaliza la sesión actual y crea una nueva para la persona indicada.
-        La consulta al API se hace en un thread para no bloquear la UI."""
+        """Finaliza la sesión actual y prepara preguntas para la nueva persona.
+
+        create_session() se llama en el hilo principal DESPUÉS de verificar que
+        person_name sigue siendo la selección vigente (_pending_person). Así nunca
+        se crea una sesión en la BD para una persona que ya fue descartada.
+        """
+        self._pending_person = person_name
         finish_session(self.session["id"])
         self.status_label.configure(
             text=f"⏳  Preparando preguntas para {person_name}...",
@@ -725,11 +746,20 @@ class AnalysisPage(ctk.CTkFrame):
             if not g:
                 self.after(0, self._exit)
                 return
-            all_qs      = g["questions"]
-            n           = min(n_questions, len(all_qs))
-            selected    = random.sample(all_qs, n)
-            new_session = create_session(person_name, selected, question_group=q_group)
-            self.after(0, lambda: self._apply_new_person(person_name, n, selected, new_session))
+            all_qs   = g["questions"]
+            n        = min(n_questions, len(all_qs))
+            selected = random.sample(all_qs, n)
+
+            def _create_and_apply():
+                # Verificar en el hilo principal antes de crear la sesión en la BD.
+                # Si el usuario cambió de persona mientras cargaban las preguntas,
+                # se descarta sin crear ningún registro.
+                if self._pending_person != person_name:
+                    return
+                new_session = create_session(person_name, selected, question_group=q_group)
+                self._apply_new_person(person_name, n, selected, new_session)
+
+            self.after(0, _create_and_apply)
 
         threading.Thread(target=_prepare, daemon=True).start()
 
