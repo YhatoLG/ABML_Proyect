@@ -657,12 +657,14 @@ class AnalysisPage(ctk.CTkFrame):
         self._load_new_person(next_person)
 
     def _export_group_report(self):
-        """Guarda el reporte del grupo en la base de datos via API."""
+        """Guarda el reporte del grupo en la base de datos via API y lanza el cómputo ACU."""
         if not self._group_records or self._group_report_saved:
             return
         self._group_report_saved = True
 
         import json as _json
+        from model.acu_engine import compute_and_save_async
+
         now = datetime.datetime.now()
 
         seen, persons = set(), []
@@ -672,7 +674,19 @@ class AnalysisPage(ctk.CTkFrame):
                 seen.add(p)
                 persons.append(p)
 
-        reporte_id = str(uuid.uuid4())
+        reporte_id  = str(uuid.uuid4())
+        grupo_name  = self._q_group_name or "grupo"
+        fecha_str   = now.strftime("%Y-%m-%d")
+        hora_str    = now.strftime("%H:%M:%S")
+
+        # Lanzar ACU en background de forma independiente al guardado del reporte
+        compute_and_save_async(
+            reporte_id,
+            grupo_name,
+            list(self._group_records),  # copia para evitar mutación concurrente
+            fecha_str,
+            hora_str,
+        )
 
         def _save():
             try:
@@ -680,9 +694,9 @@ class AnalysisPage(ctk.CTkFrame):
                     f"{API_BASE_URL}/api/reportes_grupo",
                     json={
                         "id":           reporte_id,
-                        "nombre_grupo": self._q_group_name or "grupo",
-                        "fecha":        now.strftime("%Y-%m-%d"),
-                        "hora":         now.strftime("%H:%M:%S"),
+                        "nombre_grupo": grupo_name,
+                        "fecha":        fecha_str,
+                        "hora":         hora_str,
                         "personas":     _json.dumps(persons, ensure_ascii=False),
                         "registros":    _json.dumps(self._group_records, ensure_ascii=False),
                     },
