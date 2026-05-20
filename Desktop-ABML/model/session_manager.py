@@ -21,11 +21,22 @@ def _local_dir(session_id: str) -> str:
 
 def load_sessions() -> list:
     try:
-        r = API_SESSION.get(_SESIONES_URL, timeout=10)
+        r = API_SESSION.post(
+            _CONSULTA_URL,
+            json={
+                "consulta": (
+                    "SELECT * FROM sesiones s "
+                    "WHERE EXISTS (SELECT 1 FROM registros r WHERE r.sesion_id = s.id) "
+                    "ORDER BY fecha DESC, hora_inicio DESC"
+                ),
+                "parametros": {},
+            },
+            timeout=10,
+        )
         if r.status_code != 200:
             return []
-        data = r.json()
-        sessions = data.get("datos", [])
+        data     = r.json()
+        sessions = data.get("resultados") or data.get("Resultados") or []
         result   = []
         for s in sessions:
             sid = s.get("id", "")
