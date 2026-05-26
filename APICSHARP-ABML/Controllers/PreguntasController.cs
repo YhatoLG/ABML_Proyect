@@ -56,6 +56,17 @@ public class PreguntasController : ControllerBase
         return Ok(actual);
     }
 
+    // DELETE /api/preguntas/actual
+    // Limpia el estado en memoria. Usado por la suite de pruebas para garantizar
+    // un estado limpio antes de cada test que requiera "sin sesión activa".
+    [HttpDelete("actual")]
+    public async Task<IActionResult> LimpiarActual()
+    {
+        _estado.Limpiar();
+        await _hub.Clients.All.SendAsync("SesionFinalizada");
+        return NoContent();   // 204
+    }
+
     // POST /api/preguntas/siguiente
     // Python lo llama cada vez que el usuario presiona "Siguiente Pregunta".
     // El body es un JSON con los campos de PreguntaDto.
