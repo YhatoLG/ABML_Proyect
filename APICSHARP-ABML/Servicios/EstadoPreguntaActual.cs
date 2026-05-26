@@ -25,6 +25,7 @@ public interface IEstadoPreguntaActual
 {
     PreguntaDto? ObtenerActual();
     void Establecer(PreguntaDto pregunta);
+    void Limpiar();
 }
 
 public class EstadoPreguntaActual : IEstadoPreguntaActual
@@ -42,5 +43,11 @@ public class EstadoPreguntaActual : IEstadoPreguntaActual
     {
         lock (_lock)
             _actual = pregunta;
+    }
+
+    public void Limpiar()
+    {
+        lock (_lock)
+            _actual = null;
     }
 }
